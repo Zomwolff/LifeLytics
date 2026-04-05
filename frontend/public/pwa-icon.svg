@@ -1,0 +1,22 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F172A" />
+      <stop offset="1" stop-color="#0EA5E9" />
+    </linearGradient>
+    <linearGradient id="accent" x1="128" y1="160" x2="384" y2="352" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67E8F9" />
+      <stop offset="1" stop-color="#FFFFFF" />
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#bg)" />
+  <rect x="80" y="112" width="352" height="240" rx="48" fill="rgba(15,23,42,0.72)" stroke="#38BDF8" stroke-width="12" />
+  <path d="M132 300L188 256L228 280L292 196L352 220L380 180" stroke="url(#accent)" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="132" cy="300" r="14" fill="#F8FAFC" />
+  <circle cx="188" cy="256" r="14" fill="#F8FAFC" />
+  <circle cx="228" cy="280" r="14" fill="#F8FAFC" />
+  <circle cx="292" cy="196" r="14" fill="#F8FAFC" />
+  <circle cx="352" cy="220" r="14" fill="#F8FAFC" />
+  <circle cx="380" cy="180" r="14" fill="#F8FAFC" />
+  <path d="M156 180C182 152 230 148 256 176C282 148 330 152 356 180" stroke="#67E8F9" stroke-width="18" stroke-linecap="round" />
+</svg>
