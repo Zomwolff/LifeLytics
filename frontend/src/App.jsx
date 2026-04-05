@@ -4,6 +4,7 @@ import Startup from "./pages/Startup";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Home from "./pages/Home";
+import Chatbot from "./pages/Chatbot";
 import { getSessionUser, loginUser, logoutUser, registerUser, subscribeToAuthChanges } from "./auth";
 
 export default function App() {
@@ -57,5 +58,6 @@ export default function App() {
   if (page === "startup") return <Startup goLogin={() => setPage("login")} goSignup={() => setPage("signup")} />;
   if (page === "login") return <Login onContinue={handleLogin} goSignup={() => setPage("signup")} />;
   if (page === "signup") return <Signup onContinue={handleSignup} goLogin={() => setPage("login")} />;
-  return <Home user={user} onLogout={handleLogout} />;
+  if (page === "chat") return <Chatbot user={user} goBack={() => setPage("home")} />;
+  return <Home user={user} goChat={() => setPage("chat")} />;
 }
