@@ -102,6 +102,10 @@ function toSafeUser(user) {
     id: user.id,
     name: user.name,
     email: user.email,
+    age: user.age ?? null,
+    gender: user.gender ?? null,
+    heightCm: user.heightCm ?? null,
+    weightKg: user.weightKg ?? null,
   };
 }
 
@@ -137,6 +141,10 @@ export async function registerUser({ name, email, password, confirmPassword }) {
     id: crypto.randomUUID(),
     name: cleanName,
     email: cleanEmail,
+    age: null,
+    gender: null,
+    heightCm: null,
+    weightKg: null,
     passwordHash,
     salt,
     createdAt: new Date().toISOString(),
@@ -179,6 +187,85 @@ export function getSessionUser() {
 
 export function logoutUser() {
   clearSession();
+}
+
+export function saveUserMetrics({ userId, heightCm, weightKg }) {
+  const parsedHeight = Number(heightCm);
+  const parsedWeight = Number(weightKg);
+
+  if (!Number.isFinite(parsedHeight) || parsedHeight < 80 || parsedHeight > 260) {
+    return { ok: false, error: "Enter a valid height in cm." };
+  }
+
+  if (!Number.isFinite(parsedWeight) || parsedWeight < 20 || parsedWeight > 400) {
+    return { ok: false, error: "Enter a valid weight in kg." };
+  }
+
+  const users = loadUsers();
+  const index = users.findIndex((u) => u.id === userId);
+  if (index < 0) {
+    return { ok: false, error: "User session not found. Please login again." };
+  }
+
+  users[index] = {
+    ...users[index],
+    heightCm: Number(parsedHeight.toFixed(1)),
+    weightKg: Number(parsedWeight.toFixed(1)),
+    updatedAt: new Date().toISOString(),
+  };
+
+  saveUsers(users);
+  notifyAuthChanged();
+  return { ok: true, user: toSafeUser(users[index]) };
+}
+
+export function updateUserProfileField({ userId, field, value }) {
+  const users = loadUsers();
+  const index = users.findIndex((u) => u.id === userId);
+  if (index < 0) {
+    return { ok: false, error: "User session not found. Please login again." };
+  }
+
+  const current = users[index];
+
+  if (field === "name") {
+    const nextName = String(value ?? "").trim();
+    if (!nextName) {
+      return { ok: false, error: "Name is required." };
+    }
+    users[index] = { ...current, name: nextName, updatedAt: new Date().toISOString() };
+  } else if (field === "age") {
+    const parsedAge = Number(value);
+    if (!Number.isFinite(parsedAge) || parsedAge < 1 || parsedAge > 120) {
+      return { ok: false, error: "Enter a valid age." };
+    }
+    users[index] = { ...current, age: Math.round(parsedAge), updatedAt: new Date().toISOString() };
+  } else if (field === "gender") {
+    const allowed = ["Male", "Female", "Other", "Prefer not to say"];
+    const nextGender = String(value ?? "").trim();
+    if (!allowed.includes(nextGender)) {
+      return { ok: false, error: "Select a valid gender." };
+    }
+    users[index] = { ...current, gender: nextGender, updatedAt: new Date().toISOString() };
+  } else if (field === "heightCm") {
+    const parsedHeight = Number(value);
+    if (!Number.isFinite(parsedHeight) || parsedHeight < 80 || parsedHeight > 260) {
+      return { ok: false, error: "Enter a valid height in cm." };
+    }
+    users[index] = { ...current, heightCm: Number(parsedHeight.toFixed(1)), updatedAt: new Date().toISOString() };
+  } else if (field === "weightKg") {
+    const parsedWeight = Number(value);
+    if (!Number.isFinite(parsedWeight) || parsedWeight < 20 || parsedWeight > 400) {
+      return { ok: false, error: "Enter a valid weight in kg." };
+    }
+    users[index] = { ...current, weightKg: Number(parsedWeight.toFixed(1)), updatedAt: new Date().toISOString() };
+  } else {
+    return { ok: false, error: "Unsupported profile field." };
+  }
+
+  saveUsers(users);
+  notifyAuthChanged();
+  return { ok: true, user: toSafeUser(users[index]) };
 }
 
 export function subscribeToAuthChanges(callback) {

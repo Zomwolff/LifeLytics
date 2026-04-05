@@ -1,8 +1,7 @@
-
 import { useState } from "react";
 import { motion } from "framer-motion";
 
-export default function Home({ user, goHome, goChat, goMetrics, goProfile, onLogout }) {
+export default function Metrics({ user, goHome, goChat, goMetrics, goProfile, onLogout }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const bmi = Number.isFinite(user?.heightCm) && Number.isFinite(user?.weightKg)
@@ -79,7 +78,10 @@ export default function Home({ user, goHome, goChat, goMetrics, goProfile, onLog
             <button
               type="button"
               aria-label="Open menu"
-              onClick={() => setIsMenuOpen((prev) => !prev)}
+              onClick={() => {
+                setIsProfileMenuOpen(false);
+                setIsMenuOpen((prev) => !prev);
+              }}
               className="grid h-10 w-10 place-items-center rounded-full border border-[#8ea2bf] bg-[rgba(255,255,255,0.68)] text-[#23334d] shadow-[0_8px_18px_rgba(31,43,64,0.15)]"
             >
               <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -95,7 +97,6 @@ export default function Home({ user, goHome, goChat, goMetrics, goProfile, onLog
                   type="button"
                   onClick={() => {
                     setIsMenuOpen(false);
-                    setIsProfileMenuOpen(false);
                     goHome();
                   }}
                   className="w-full px-3 py-2 text-left text-sm font-semibold text-[#20314a] hover:bg-[#eef3fb]"
@@ -106,7 +107,6 @@ export default function Home({ user, goHome, goChat, goMetrics, goProfile, onLog
                   type="button"
                   onClick={() => {
                     setIsMenuOpen(false);
-                    setIsProfileMenuOpen(false);
                     goMetrics();
                   }}
                   className="w-full border-t border-[#d0d9e8] px-3 py-2 text-left text-sm font-semibold text-[#20314a] hover:bg-[#eef3fb]"
@@ -117,7 +117,6 @@ export default function Home({ user, goHome, goChat, goMetrics, goProfile, onLog
                   type="button"
                   onClick={() => {
                     setIsMenuOpen(false);
-                    setIsProfileMenuOpen(false);
                     goChat();
                   }}
                   className="w-full border-t border-[#d0d9e8] px-3 py-2 text-left text-sm font-semibold text-[#20314a] hover:bg-[#eef3fb]"
@@ -130,97 +129,60 @@ export default function Home({ user, goHome, goChat, goMetrics, goProfile, onLog
         </header>
 
         <div className="mb-3">
-          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-[#3b4f6d]">Dashboard</p>
-          <p
-            className="mt-1 text-[1.5rem] font-semibold leading-[1.08] text-[#131722]"
-            style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}
-          >
-            {user?.name ? `Welcome, ${user.name}` : "Welcome"}
-          </p>
+          <div>
+            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-[#3b4f6d]">Body Metrics</p>
+            <p className="mt-1 text-[1.5rem] font-semibold leading-[1.08] text-[#131722]" style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}>
+              {user?.name ? `${user.name}'s Progress` : "Your Progress"}
+            </p>
+          </div>
         </div>
 
-        <main className="grid grid-cols-2 gap-3">
-          <button
-            type="button"
-            onClick={goMetrics}
-            className="row-span-2 min-h-[222px] rounded-[1.5rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] p-4 text-left text-white shadow-[0_12px_26px_rgba(17,29,46,0.28)]"
-          >
-            <div className="mb-5 grid place-items-center">
+        <main className="space-y-3">
+          <section className="rounded-[1.5rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] p-4 text-white shadow-[0_12px_26px_rgba(17,29,46,0.28)]">
+            <div className="mb-4 grid place-items-center">
               <svg viewBox="0 0 120 62" className="h-16 w-full max-w-[176px]" fill="none" aria-hidden="true">
+                <path d="M12 50a48 48 0 0 1 96 0" stroke="rgba(158,207,255,0.35)" strokeWidth="7" strokeLinecap="round" />
                 <path
                   d="M12 50a48 48 0 0 1 96 0"
-                  stroke="rgba(158,207,255,0.35)"
-                  strokeWidth="7"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M12 50a48 48 0 0 1 96 0"
+                  stroke={bmiArcColor}
                   strokeWidth="7"
                   strokeLinecap="round"
                   pathLength="100"
                   strokeDasharray={`${(bmiProgress * 100).toFixed(1)} 100`}
-                  stroke={bmiArcColor}
                 />
               </svg>
             </div>
-            <p
-              className="-mt-12 mb-6 text-center text-[3rem] font-bold tracking-[-0.02em]"
-              style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}
-            >
+            <p className="-mt-10 mb-4 text-center text-[2.8rem] font-bold tracking-[-0.02em]" style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}>
               {bmi ? bmi.toFixed(1) : "--"}
             </p>
-            <div className="space-y-1 text-[0.98rem] font-semibold leading-tight text-[#e8efff]">
-              <p>Height : {Number.isFinite(user?.heightCm) ? `${user.heightCm} cm` : "-"}</p>
-              <p>Weight : {Number.isFinite(user?.weightKg) ? `${user.weightKg} kg` : "-"}</p>
-              <p>BMI : {bmi ? bmi.toFixed(1) : "-"}</p>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-xl bg-white/10 px-2 py-2">
+                <p className="text-[0.65rem] uppercase tracking-[0.14em] text-[#a9c3e8]">Height</p>
+                <p className="mt-1 text-sm font-semibold">{Number.isFinite(user?.heightCm) ? `${user.heightCm} cm` : "-"}</p>
+              </div>
+              <div className="rounded-xl bg-white/10 px-2 py-2">
+                <p className="text-[0.65rem] uppercase tracking-[0.14em] text-[#a9c3e8]">Weight</p>
+                <p className="mt-1 text-sm font-semibold">{Number.isFinite(user?.weightKg) ? `${user.weightKg} kg` : "-"}</p>
+              </div>
+              <div className="rounded-xl bg-white/10 px-2 py-2">
+                <p className="text-[0.65rem] uppercase tracking-[0.14em] text-[#a9c3e8]">BMI</p>
+                <p className="mt-1 text-sm font-semibold">{bmi ? bmi.toFixed(1) : "-"}</p>
+              </div>
             </div>
-          </button>
-
-          <section className="min-h-[104px] rounded-[1.25rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)]">
-            <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 2a6 6 0 0 0-3.8 10.7c1 .8 1.8 2 1.8 3.3h4c0-1.3.8-2.5 1.8-3.3A6 6 0 0 0 12 2z" />
-              <path d="M9.5 19h5" />
-              <path d="M10.4 22h3.2" />
-            </svg>
-            <p
-              className="mt-1 text-[1.75rem] font-bold leading-[1.03] tracking-[-0.01em]"
-              style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}
-            >
-              AI
-            </p>
-            <p
-              className="text-[1.75rem] font-bold leading-[1.03] tracking-[-0.01em]"
-              style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}
-            >
-              Insights
-            </p>
           </section>
 
-          <section className="min-h-[104px] rounded-[1.25rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)]">
-            <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.2">
-              <path d="M3 17l6-6 4 4 7-7" />
-              <path d="M14 8h6v6" />
-            </svg>
-            <p
-              className="mt-2 text-[1.75rem] font-bold leading-[1.04] tracking-[-0.01em]"
-              style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}
-            >
-              Trends
-            </p>
-          </section>
-
-          <section className="col-span-2 min-h-[106px] rounded-[1.35rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)]">
-            <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="7" width="18" height="13" rx="2" />
-              <path d="M8 7l1.3-2h5.4L16 7" />
-              <circle cx="12" cy="13.5" r="3.2" />
-            </svg>
-            <p
-              className="mt-1 text-[1.7rem] font-bold leading-[1.02] tracking-[-0.01em]"
-              style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}
-            >
-              Prescription Insights
-            </p>
+          <section className="rounded-[1.25rem] border border-white/30 bg-[rgba(255,255,255,0.58)] px-4 py-3 text-[#1a2b43] shadow-[0_10px_22px_rgba(31,43,64,0.14)]">
+            <p className="text-sm font-semibold text-[#2b4467]">Latest Entries</p>
+            <ul className="mt-2 space-y-2 text-sm">
+              <li className="flex items-center justify-between rounded-lg bg-white/60 px-3 py-2">
+                <span>2026-04-05</span>
+                <span>72 kg | BMI 23.5</span>
+              </li>
+              <li className="flex items-center justify-between rounded-lg bg-white/60 px-3 py-2">
+                <span>2026-03-29</span>
+                <span>72.6 kg | BMI 23.7</span>
+              </li>
+            </ul>
           </section>
         </main>
 
@@ -231,9 +193,7 @@ export default function Home({ user, goHome, goChat, goMetrics, goProfile, onLog
             className="w-full rounded-[1rem] border border-[#a3b3cb] bg-[rgba(255,255,255,0.56)] px-3 py-2 text-left shadow-[0_8px_20px_rgba(31,43,64,0.14)] backdrop-blur-[2px]"
           >
             <div className="flex items-center gap-2 text-[#3a4c68]">
-              <span className="grid h-9 w-9 place-items-center rounded-[0.6rem] border border-[#6a7f9f] text-3xl leading-none text-[#21314a]">
-                +
-              </span>
+              <span className="grid h-9 w-9 place-items-center rounded-[0.6rem] border border-[#6a7f9f] text-3xl leading-none text-[#21314a]">+</span>
               <input
                 readOnly
                 onFocus={goChat}
