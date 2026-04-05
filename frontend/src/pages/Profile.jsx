@@ -189,6 +189,30 @@ export default function Profile({ user, onSaveField, goBack }) {
             onSave={handleSave}
           />
 
+          <ProfileRow
+            label="Target Steps"
+            field="targetSteps"
+            type="number"
+            value={Number.isFinite(user?.targetSteps) ? `${user.targetSteps}` : "10000"}
+            editingField={editingField}
+            draftValue={draftValue}
+            setDraftValue={setDraftValue}
+            setEditingField={(field) => (field ? startEdit(field, user?.targetSteps ? String(user.targetSteps) : "10000") : setEditingField(null))}
+            onSave={handleSave}
+          />
+
+          <ProfileRow
+            label="Daily Calories Target (kcal)"
+            field="caloriesTarget"
+            type="number"
+            value={Number.isFinite(user?.caloriesTarget) ? `${user.caloriesTarget}` : "2000"}
+            editingField={editingField}
+            draftValue={draftValue}
+            setDraftValue={setDraftValue}
+            setEditingField={(field) => (field ? startEdit(field, user?.caloriesTarget ? String(user.caloriesTarget) : "2000") : setEditingField(null))}
+            onSave={handleSave}
+          />
+
           {error ? <p className="text-center text-xs font-semibold text-rose-600 md:col-span-2">{error}</p> : null}
         </div>
       </motion.div>

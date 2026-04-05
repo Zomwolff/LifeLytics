@@ -211,9 +211,11 @@ export async function logoutUser() {
   clearSession();
 }
 
-export function saveUserMetrics({ userId, heightCm, weightKg }) {
+export function saveUserMetrics({ userId, heightCm, weightKg, targetSteps, caloriesTarget }) {
   const parsedHeight = Number(heightCm);
   const parsedWeight = Number(weightKg);
+  const parsedSteps = Number(targetSteps);
+  const parsedCalories = Number(caloriesTarget);
 
   if (!Number.isFinite(parsedHeight) || parsedHeight < 80 || parsedHeight > 260) {
     return { ok: false, error: "Enter a valid height in cm." };
@@ -221,6 +223,14 @@ export function saveUserMetrics({ userId, heightCm, weightKg }) {
 
   if (!Number.isFinite(parsedWeight) || parsedWeight < 20 || parsedWeight > 400) {
     return { ok: false, error: "Enter a valid weight in kg." };
+  }
+
+  if (!Number.isFinite(parsedSteps) || parsedSteps < 1000 || parsedSteps > 50000) {
+    return { ok: false, error: "Enter a valid target steps (1000-50000)." };
+  }
+
+  if (!Number.isFinite(parsedCalories) || parsedCalories < 1200 || parsedCalories > 5000) {
+    return { ok: false, error: "Enter a valid daily calories target (1200-5000)." };
   }
 
   const users = loadUsers();
@@ -233,6 +243,8 @@ export function saveUserMetrics({ userId, heightCm, weightKg }) {
     ...users[index],
     heightCm: Number(parsedHeight.toFixed(1)),
     weightKg: Number(parsedWeight.toFixed(1)),
+    targetSteps: parsedSteps,
+    caloriesTarget: parsedCalories,
     updatedAt: new Date().toISOString(),
   };
 
@@ -281,6 +293,18 @@ export function updateUserProfileField({ userId, field, value }) {
       return { ok: false, error: "Enter a valid weight in kg." };
     }
     users[index] = { ...current, weightKg: Number(parsedWeight.toFixed(1)), updatedAt: new Date().toISOString() };
+  } else if (field === "targetSteps") {
+    const parsedSteps = Number(value);
+    if (!Number.isFinite(parsedSteps) || parsedSteps < 1000 || parsedSteps > 50000) {
+      return { ok: false, error: "Enter valid target steps (1000-50000)." };
+    }
+    users[index] = { ...current, targetSteps: parsedSteps, updatedAt: new Date().toISOString() };
+  } else if (field === "caloriesTarget") {
+    const parsedCalories = Number(value);
+    if (!Number.isFinite(parsedCalories) || parsedCalories < 1200 || parsedCalories > 5000) {
+      return { ok: false, error: "Enter valid daily calories target (1200-5000)." };
+    }
+    users[index] = { ...current, caloriesTarget: parsedCalories, updatedAt: new Date().toISOString() };
   } else {
     return { ok: false, error: "Unsupported profile field." };
   }

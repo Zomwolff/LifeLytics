@@ -2,14 +2,17 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { apiFetch } from "../api/client";
 
-function WeeklyBarChart({ title, unit, values, maxValue, colorClass }) {
+function WeeklyBarChart({ title, unit, values, maxValue, colorClass, target }) {
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
   return (
     <section className="rounded-[1.25rem] border border-white/30 bg-[rgba(255,255,255,0.62)] p-4 shadow-[0_10px_22px_rgba(31,43,64,0.14)]">
       <div className="mb-3 flex items-end justify-between gap-2">
         <p className="text-sm font-semibold text-[#2b4467]">{title}</p>
-        <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[#4e6486]">Weekly</p>
+        <div className="flex items-center gap-2">
+          {target !== undefined && <p className="text-[0.68rem] font-semibold text-[#4e6486]">Target: {target}</p>}
+          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[#4e6486]">Weekly</p>
+        </div>
       </div>
 
       <div className="grid h-40 grid-cols-7 items-end gap-2 rounded-xl border border-[#c8d5e6] bg-[linear-gradient(180deg,rgba(238,244,252,0.85),rgba(225,235,248,0.88))] px-2 py-3">
@@ -40,27 +43,24 @@ function normalizeSeries(series, fallback) {
   return parsed.every((value) => Number.isFinite(value)) ? parsed : fallback;
 }
 
-function sumSeries(left, right) {
-  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== 7 || right.length !== 7) {
-    return null;
-  }
-
-  const result = left.map((value, index) => Number(value) + Number(right[index]));
-  return result.every((value) => Number.isFinite(value)) ? result : null;
-}
-
 export default function Trends({ user, goBack }) {
-  const fallbackSleep = [6.5, 7.1, 6.8, 7.4, 7.0, 8.0, 7.6];
-  const fallbackSteps = [6100, 7400, 6900, 8200, 9100, 10200, 8800];
-  const fallbackCaloriesBurnt = [1940, 2025, 1982, 2080, 2154, 2210, 2117];
-  const fallbackBloodGlucose = [102, 110, 106, 98, 104, 100, 96];
+  const fallbackSleep = [0, 0, 0, 0, 0, 0, 0];
+  const fallbackSteps = [0, 0, 0, 0, 0, 0, 0];
+  const fallbackCaloriesIntake = [0, 0, 0, 0, 0, 0, 0];
+  const fallbackBloodGlucose = [0, 0, 0, 0, 0, 0, 0];
 
   const [weeklySleep, setWeeklySleep] = useState(fallbackSleep);
   const [weeklySteps, setWeeklySteps] = useState(fallbackSteps);
-  const [weeklyCaloriesBurnt, setWeeklyCaloriesBurnt] = useState(fallbackCaloriesBurnt);
+  const [weeklyCaloriesIntake, setWeeklyCaloriesIntake] = useState(fallbackCaloriesIntake);
   const [weeklyBloodGlucose, setWeeklyBloodGlucose] = useState(fallbackBloodGlucose);
   const [isLoadingTrends, setIsLoadingTrends] = useState(false);
   const [trendsError, setTrendsError] = useState("");
+
+  // Calculate averages
+  const avgSleep = (weeklySleep.reduce((a, b) => a + b, 0) / weeklySleep.length).toFixed(1);
+  const totalSteps = weeklySteps.reduce((a, b) => a + b, 0);
+  const avgCalories = (weeklyCaloriesIntake.reduce((a, b) => a + b, 0) / weeklyCaloriesIntake.length).toFixed(0);
+  const avgGlucose = (weeklyBloodGlucose.reduce((a, b) => a + b, 0) / weeklyBloodGlucose.length).toFixed(0);
 
 
   useEffect(() => {
@@ -72,29 +72,17 @@ export default function Trends({ user, goBack }) {
         const data = await apiFetch("/health/trends", { method: "GET" });
         setWeeklySleep(normalizeSeries(data.weeklySleep, fallbackSleep));
         setWeeklySteps(normalizeSeries(data.weeklySteps, fallbackSteps));
-        setWeeklyCaloriesBurnt((previous) => {
-          const normalizedTotal = normalizeSeries(data.weeklyTotalCaloriesBurnt, previous);
-          if (normalizedTotal !== previous) {
-            return normalizedTotal;
-          }
-
-          const fromComponents = sumSeries(data.weeklyActiveCaloriesBurnt, data.weeklyRestingCaloriesBurnt);
-          if (fromComponents) {
-            return fromComponents;
-          }
-
-          return normalizeSeries(data.weeklyCaloriesBurnt, previous);
-        });
+        setWeeklyCaloriesIntake(normalizeSeries(data.weeklyCaloriesIntake, fallbackCaloriesIntake));
         setWeeklyBloodGlucose(normalizeSeries(data.weeklyBloodGlucose, fallbackBloodGlucose));
       } catch {
-        setTrendsError("Backend trends unavailable right now. Showing latest cached-style values.");
+        setTrendsError("Backend trends unavailable right now. Showing database default values.");
       } finally {
         setIsLoadingTrends(false);
       }
     }
 
     fetchWeeklyTrends();
-  }, [trendsEndpoint, user?.id]);
+  }, [user?.id]);
 
   return (
     <div
@@ -127,7 +115,7 @@ export default function Trends({ user, goBack }) {
             className="mt-1 text-[1.5rem] font-semibold leading-[1.08] text-[#131722]"
             style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}
           >
-            Weekly Graphs
+            Week Summary: {avgSleep}h sleep • {totalSteps.toLocaleString()} steps • {avgCalories} kcal
           </p>
         </div>
 
@@ -152,11 +140,12 @@ export default function Trends({ user, goBack }) {
           />
 
           <WeeklyBarChart
-            title="Total Calories Burnt"
+            title="Calorie Intake"
             unit="kcal"
-            values={weeklyCaloriesBurnt}
-            maxValue={3000}
+            values={weeklyCaloriesIntake}
+            maxValue={Math.max(Number.isFinite(user?.caloriesTarget) ? user.caloriesTarget * 1.2 : 2400, 2400)}
             colorClass="bg-[linear-gradient(180deg,#ffb17f,#f1884e)]"
+            target={user?.caloriesTarget || 2000}
           />
 
           <WeeklyBarChart

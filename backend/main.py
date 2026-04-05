@@ -37,7 +37,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import os
 
-from backend.routes import health, insights, upload, chatbot, test
+from backend.routes import health, insights, upload, chatbot, test, nutrition
 from backend.utils.firebase import initializeFirebase
 from backend.utils.logger import getLogger, logger as backendLogger
 
@@ -93,6 +93,7 @@ app.add_middleware(
 # Include routers
 app.include_router(health.router, prefix="/health", tags=["Health Tracking"])
 app.include_router(insights.router, prefix="/insights", tags=["Analytics & Insights"])
+app.include_router(nutrition.router, prefix="/nutrition", tags=["Nutrition Analysis"])
 app.include_router(upload.router, prefix="/upload", tags=["Document Upload"])
 app.include_router(chatbot.router, prefix="/chatbot", tags=["AI Chat"])
 app.include_router(test.router, prefix="/test", tags=["Data Simulation & Testing"])

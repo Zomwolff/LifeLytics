@@ -69,6 +69,153 @@ function findMinIndex(values) {
   return bestIndex;
 }
 
+function average(values) {
+  if (!Array.isArray(values) || values.length === 0) return 0;
+  return values.reduce((sum, value) => sum + Number(value || 0), 0) / values.length;
+}
+
+function formatSigned(value, unit) {
+  const rounded = Math.round(value);
+  const sign = rounded > 0 ? "+" : "";
+  return `${sign}${rounded}${unit}`;
+}
+
+function buildSmartSummary({
+  weeklySleep,
+  weeklySteps,
+  weeklyCaloriesBurnt,
+  weeklyCaloriesIntake,
+  weeklyProtein,
+  weeklyCarbs,
+  weeklyFats,
+  weeklyBloodGlucose,
+  caloriesTarget,
+  selectedGoal,
+}) {
+  const avgSleep = average(weeklySleep);
+  const avgSteps = average(weeklySteps);
+  const avgBurn = average(weeklyCaloriesBurnt);
+  const avgIntake = average(weeklyCaloriesIntake);
+  const avgProtein = average(weeklyProtein);
+  const avgCarbs = average(weeklyCarbs);
+  const avgFats = average(weeklyFats);
+  const avgGlucose = average(weeklyBloodGlucose);
+
+  const caloriesGap = avgIntake - (Number(caloriesTarget) || 0);
+  const intakeStatus = caloriesGap > 0 ? `above your target by ${Math.round(caloriesGap)} kcal` : `below your target by ${Math.abs(Math.round(caloriesGap))} kcal`;
+  const activityStatus = avgSteps < 7000 ? `Your movement is a bit low at ${Math.round(avgSteps).toLocaleString()} steps/day.` : `Your movement is solid at ${Math.round(avgSteps).toLocaleString()} steps/day.`;
+  const proteinStatus = avgProtein < 70 ? `Protein is low at ${Math.round(avgProtein)} g/day.` : `Protein is holding up at ${Math.round(avgProtein)} g/day.`;
+  const glucoseStatus = avgGlucose > 110 ? `Glucose is trending high at ${Math.round(avgGlucose)} mg/dL.` : `Glucose is fairly steady at ${Math.round(avgGlucose)} mg/dL.`;
+
+  return {
+    summary: `${activityStatus} Intake is ${intakeStatus}. ${proteinStatus} ${glucoseStatus}`,
+    recommendation: buildRecommendationText({
+      avgSleep,
+      avgSteps,
+      avgBurn,
+      avgIntake,
+      avgProtein,
+      avgCarbs,
+      avgFats,
+      avgGlucose,
+      caloriesTarget,
+    }),
+    goalOutput: buildGoalOutputText({
+      selectedGoal,
+      avgSleep,
+      avgSteps,
+      avgBurn,
+      avgIntake,
+      avgProtein,
+      avgCarbs,
+      avgFats,
+      avgGlucose,
+      caloriesTarget,
+    }),
+  };
+}
+
+function buildRecommendationText({ avgSleep, avgSteps, avgBurn, avgIntake, avgProtein, avgCarbs, avgFats, avgGlucose, caloriesTarget }) {
+  const parts = [];
+
+  if (avgSteps < 7000) {
+    parts.push(`raise activity with a 20-30 minute walk to push your average above 7,000 steps/day`);
+  }
+
+  if (avgIntake > caloriesTarget) {
+    parts.push(`trim intake by about ${Math.round(avgIntake - caloriesTarget)} kcal or swap one snack for a protein-rich option`);
+  } else if (avgIntake < caloriesTarget * 0.85) {
+    parts.push(`add a balanced meal or protein snack so you do not under-fuel your day`);
+  }
+
+  if (avgProtein < 70) {
+    parts.push(`increase protein by 20-30g/day to support recovery and satiety`);
+  }
+
+  if (avgGlucose > 110) {
+    parts.push(`pair carbs with protein/fiber and keep your post-meal walks consistent to smooth glucose spikes`);
+  }
+
+  if (avgSleep < 7) {
+    parts.push(`protect 7-8 hours of sleep; your recovery looks incomplete when sleep stays under 7 hours`);
+  }
+
+  if (parts.length === 0) {
+    return `Your week looks balanced. Keep protein steady, maintain your step streak, and stay close to your calorie target.`;
+  }
+
+  return `This week, ${parts.join(". ")}.`;
+}
+
+function buildGoalOutputText({
+  selectedGoal,
+  avgSleep,
+  avgSteps,
+  avgBurn,
+  avgIntake,
+  avgProtein,
+  avgCarbs,
+  avgFats,
+  avgGlucose,
+  caloriesTarget,
+}) {
+  const goal = selectedGoal.replace(/\s*[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, "").trim();
+
+  if (goal === "Lose Weight") {
+    return `To lose weight, keep intake around ${Math.max(0, Math.round(caloriesTarget - 150))}-${Math.round(caloriesTarget)} kcal, keep steps near ${Math.max(7000, Math.round(avgSteps))} per day, and hold protein at ${Math.max(80, Math.round(avgProtein))} g/day so you stay full.`;
+  }
+
+  if (goal === "Build Muscle") {
+    return `To build muscle, aim for ${Math.max(90, Math.round(avgProtein + 20))} g protein/day, keep carbs available around training, and try to exceed ${Math.max(7500, Math.round(avgSteps))} steps with 2-3 focused strength sessions.`;
+  }
+
+  if (goal === "Improve Sleep") {
+    return `To improve sleep, stop heavy meals 2-3 hours before bed, keep caffeine earlier in the day, and protect a 7-8 hour sleep window. Your current average is ${avgSleep.toFixed(1)} hours.`;
+  }
+
+  if (goal === "Eat Healthier") {
+    return `To eat healthier, keep protein and fiber present at each meal, reduce days with high fat spikes, and keep glucose steadier by pairing carbs with protein.`;
+  }
+
+  if (goal === "Maintain Weight") {
+    return `To maintain weight, keep intake within roughly ${Math.round(caloriesTarget * 0.95)}-${Math.round(caloriesTarget * 1.05)} kcal, keep steps around ${Math.round(avgSteps)} per day, and keep protein near ${Math.round(avgProtein)} g/day.`;
+  }
+
+  if (goal === "Improve Stamina") {
+    return `To improve stamina, add one extra walk or cardio block on low-step days, keep sleep close to 7 hours, and avoid sharp calorie dips that leave you under-fueled.`;
+  }
+
+  if (goal === "Boost Energy") {
+    return `To boost energy, spread carbs and protein more evenly through the day, keep hydration and sleep consistent, and avoid large calorie swings from one day to the next.`;
+  }
+
+  if (goal === "Stay Consistent") {
+    return `To stay consistent, repeat the days where you hit good protein and step numbers, and keep your meals close to the same calorie range each day.`;
+  }
+
+  return `Your current average intake is ${Math.round(avgIntake)} kcal with ${Math.round(avgSteps).toLocaleString()} steps/day. Keep the trend moving in a steady, repeatable way.`;
+}
+
 export default function AiInsights({ user, goBack }) {
   const [selectedGoal, setSelectedGoal] = useState("Maintain Weight");
   const [recommendation, setRecommendation] = useState("Loading recommendation...");
@@ -78,10 +225,14 @@ export default function AiInsights({ user, goBack }) {
   const [isLoadingTrends, setIsLoadingTrends] = useState(false);
   const [trendsError, setTrendsError] = useState("");
   const [activeActivityCard, setActiveActivityCard] = useState(0);
-  const [weeklySleep, setWeeklySleep] = useState([6.5, 7.1, 6.8, 7.4, 7.0, 8.0, 7.6]);
-  const [weeklySteps, setWeeklySteps] = useState([6100, 7400, 6900, 8200, 9100, 10200, 8800]);
-  const [weeklyCaloriesBurnt, setWeeklyCaloriesBurnt] = useState([1940, 2025, 1982, 2080, 2154, 2210, 2117]);
-  const [weeklyBloodGlucose, setWeeklyBloodGlucose] = useState([102, 110, 106, 98, 104, 100, 96]);
+  const [weeklySleep, setWeeklySleep] = useState([0, 0, 0, 0, 0, 0, 0]);
+  const [weeklySteps, setWeeklySteps] = useState([0, 0, 0, 0, 0, 0, 0]);
+  const [weeklyCaloriesBurnt, setWeeklyCaloriesBurnt] = useState([0, 0, 0, 0, 0, 0, 0]);
+  const [weeklyCaloriesIntake, setWeeklyCaloriesIntake] = useState([0, 0, 0, 0, 0, 0, 0]);
+  const [weeklyProtein, setWeeklyProtein] = useState([0, 0, 0, 0, 0, 0, 0]);
+  const [weeklyCarbs, setWeeklyCarbs] = useState([0, 0, 0, 0, 0, 0, 0]);
+  const [weeklyFats, setWeeklyFats] = useState([0, 0, 0, 0, 0, 0, 0]);
+  const [weeklyBloodGlucose, setWeeklyBloodGlucose] = useState([0, 0, 0, 0, 0, 0, 0]);
 
   const goals = [
     "Lose Weight ⚖️",
@@ -110,15 +261,40 @@ export default function AiInsights({ user, goBack }) {
   );
 
   const aiInsightsEndpoint = import.meta.env.VITE_AI_INSIGHTS_ENDPOINT || "/api/ai-insights";
-  const trendsEndpoint = import.meta.env.VITE_TRENDS_ENDPOINT || "/api/trends-weekly";
-
   const activityCards = useMemo(() => {
+    const bestProteinIndex = findMaxIndex(weeklyProtein);
+    const bestIntakeIndex = findMaxIndex(weeklyCaloriesIntake);
+    const bestBurnIndex = findMaxIndex(weeklyCaloriesBurnt);
     const bestStepsIndex = findMaxIndex(weeklySteps);
-    const bestSleepIndex = findMaxIndex(weeklySleep);
-    const bestCaloriesIndex = findMaxIndex(weeklyCaloriesBurnt);
     const bestGlucoseIndex = findMinIndex(weeklyBloodGlucose);
+    const lowestCarbsIndex = findMinIndex(weeklyCarbs);
+    const lowestFatsIndex = findMinIndex(weeklyFats);
 
     return [
+      {
+        id: "protein",
+        eyebrow: "Protein Highlight",
+        title: `Highest protein intake was on ${DAYS[bestProteinIndex]}`,
+        value: `${Math.round(weeklyProtein[bestProteinIndex])} g`,
+        note: "This was your best protein day this week.",
+        chip: "bg-[linear-gradient(160deg,#4ea9ff,#3b7ed6)]",
+      },
+      {
+        id: "calories-intake",
+        eyebrow: "Intake Highlight",
+        title: `Highest caloric intake was on ${DAYS[bestIntakeIndex]}`,
+        value: `${Math.round(weeklyCaloriesIntake[bestIntakeIndex])} kcal`,
+        note: "Total consumed calories from logged meals.",
+        chip: "bg-[linear-gradient(160deg,#f3a06f,#dc7b44)]",
+      },
+      {
+        id: "calories-burn",
+        eyebrow: "Burn Highlight",
+        title: `Highest caloric burn was on ${DAYS[bestBurnIndex]}`,
+        value: `${Math.round(weeklyCaloriesBurnt[bestBurnIndex])} kcal`,
+        note: "Total burned calories from smartwatch data.",
+        chip: "bg-[linear-gradient(160deg,#ff9f65,#d46c30)]",
+      },
       {
         id: "steps",
         eyebrow: "Movement Highlight",
@@ -128,22 +304,6 @@ export default function AiInsights({ user, goBack }) {
         chip: "bg-[linear-gradient(160deg,#49cfa7,#2f9f86)]",
       },
       {
-        id: "sleep",
-        eyebrow: "Sleep Highlight",
-        title: `You got the best sleep on ${DAYS[bestSleepIndex]}`,
-        value: `${weeklySleep[bestSleepIndex].toFixed(1)} hours`,
-        note: "Your recovery was best here. Mirror that bedtime pattern.",
-        chip: "bg-[linear-gradient(160deg,#6a8fff,#4c6ad8)]",
-      },
-      {
-        id: "calories",
-        eyebrow: "Burn Highlight",
-        title: `You burnt the most total calories on ${DAYS[bestCaloriesIndex]}`,
-        value: `${Math.round(weeklyCaloriesBurnt[bestCaloriesIndex])} kcal`,
-        note: "This includes active plus resting calories. Great full-day energy output.",
-        chip: "bg-[linear-gradient(160deg,#f3a06f,#dc7b44)]",
-      },
-      {
         id: "glucose",
         eyebrow: "Glucose Highlight",
         title: `Your best glucose level was on ${DAYS[bestGlucoseIndex]}`,
@@ -151,10 +311,42 @@ export default function AiInsights({ user, goBack }) {
         note: "Most stable reading this week. Keep meals and timing consistent.",
         chip: "bg-[linear-gradient(160deg,#ef8ea8,#cb607a)]",
       },
+      {
+        id: "low-carbs",
+        eyebrow: "Low Carbs Day",
+        title: `Lowest carbs were on ${DAYS[lowestCarbsIndex]}`,
+        value: `${Math.round(weeklyCarbs[lowestCarbsIndex])} g`,
+        note: "This day had the minimum carbohydrate intake.",
+        chip: "bg-[linear-gradient(160deg,#8fb4ff,#5f84d8)]",
+      },
+      {
+        id: "low-fats",
+        eyebrow: "Low Fats Day",
+        title: `Lowest fats were on ${DAYS[lowestFatsIndex]}`,
+        value: `${Math.round(weeklyFats[lowestFatsIndex])} g`,
+        note: "This day had the minimum fat intake.",
+        chip: "bg-[linear-gradient(160deg,#8dd0b0,#5ea285)]",
+      },
     ];
-  }, [weeklyBloodGlucose, weeklyCaloriesBurnt, weeklySleep, weeklySteps]);
+  }, [weeklyBloodGlucose, weeklyCaloriesBurnt, weeklyCaloriesIntake, weeklyProtein, weeklyCarbs, weeklyFats, weeklySteps]);
 
   const currentActivityCard = activityCards[activeActivityCard] || activityCards[0];
+
+  const smartPlan = useMemo(
+    () => buildSmartSummary({
+      weeklySleep,
+      weeklySteps,
+      weeklyCaloriesBurnt,
+      weeklyCaloriesIntake,
+      weeklyProtein,
+      weeklyCarbs,
+      weeklyFats,
+      weeklyBloodGlucose,
+      caloriesTarget: user?.caloriesTarget || 2000,
+      selectedGoal,
+    }),
+    [selectedGoal, user?.caloriesTarget, weeklyBloodGlucose, weeklyCaloriesBurnt, weeklyCaloriesIntake, weeklyCarbs, weeklyFats, weeklyProtein, weeklySleep, weeklySteps]
+  );
 
  useEffect(() => {
   async function fetchInsights() {
@@ -162,22 +354,21 @@ export default function AiInsights({ user, goBack }) {
     setInsightsError("");
     try {
       const data = await apiFetch("/insights/", { method: "POST" });
-      setRecommendation(data.explanation || data.recommendations?.[0] || "No recommendation returned.");
-      setGoalOutput(
-        data.recommendations?.find(r => r.toLowerCase().includes(normalizedGoal.toLowerCase()))
-        || data.recommendations?.[0]
-        || "No goal output returned."
-      );
+      const fallbackRecommendation = data.explanation || data.recommendations?.[0] || "";
+      const fallbackGoal = data.recommendations?.find(r => r.toLowerCase().includes(normalizedGoal.toLowerCase())) || data.recommendations?.[0] || "";
+
+      setRecommendation(fallbackRecommendation || smartPlan.recommendation);
+      setGoalOutput(fallbackGoal || smartPlan.goalOutput);
     } catch {
       setInsightsError("Backend insights unavailable right now.");
-      setRecommendation("No recommendation available.");
-      setGoalOutput("No goal output available.");
+      setRecommendation(smartPlan.recommendation);
+      setGoalOutput(smartPlan.goalOutput);
     } finally {
       setIsLoadingInsights(false);
     }
   }
   fetchInsights();
-}, [normalizedGoal]);
+}, [normalizedGoal, smartPlan.goalOutput, smartPlan.recommendation]);
 
   useEffect(() => {
   async function fetchTrends() {
@@ -187,16 +378,17 @@ export default function AiInsights({ user, goBack }) {
       const data = await apiFetch("/health/trends", { method: "GET" });
       setWeeklySleep(prev => normalizeSeries(data.weeklySleep, prev));
       setWeeklySteps(prev => normalizeSeries(data.weeklySteps, prev));
-      setWeeklyCaloriesBurnt(prev => {
-        const total = normalizeSeries(data.weeklyTotalCaloriesBurnt, prev);
-        if (total !== prev) return total;
-        const combined = sumSeries(data.weeklyActiveCaloriesBurnt, data.weeklyRestingCaloriesBurnt);
-        return combined || normalizeSeries(data.weeklyCaloriesBurnt, prev);
-      });
+      setWeeklyCaloriesBurnt(prev => normalizeSeries(data.weeklyCaloriesBurned, prev));
+      setWeeklyCaloriesIntake(prev => normalizeSeries(data.weeklyCaloriesIntake, prev));
+      setWeeklyProtein(prev => normalizeSeries(data.weeklyProtein, prev));
+      setWeeklyCarbs(prev => normalizeSeries(data.weeklyCarbs, prev));
+      setWeeklyFats(prev => normalizeSeries(data.weeklyFats, prev));
       setWeeklyBloodGlucose(prev => normalizeSeries(data.weeklyBloodGlucose, prev));
       setActiveActivityCard(0);
     } catch {
-      setTrendsError("Trend highlights are using recent cached values right now.");
+      setTrendsError("Trend highlights are using database defaults right now.");
+      setRecommendation(smartPlan.recommendation);
+      setGoalOutput(smartPlan.goalOutput);
     } finally {
       setIsLoadingTrends(false);
     }
@@ -242,6 +434,11 @@ export default function AiInsights({ user, goBack }) {
           <p className="text-sm font-semibold text-[#2b4467]">Daily Activity Snapshot</p>
           {isLoadingTrends ? <p className="mt-2 text-xs font-semibold text-[#3c5374]">Loading activity highlights...</p> : null}
           {trendsError ? <p className="mt-2 text-xs font-semibold text-[#9e2f2f]">{trendsError}</p> : null}
+
+          <div className="mt-3 rounded-[1rem] border border-[#cfd9e9] bg-white/75 px-4 py-3 text-sm leading-relaxed text-[#21324a] shadow-[0_8px_18px_rgba(31,43,64,0.08)]">
+            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[#466085]">Weekly Summary</p>
+            <p className="mt-1">{smartPlan.summary}</p>
+          </div>
 
           <div className="mt-3 rounded-[1.2rem] border border-white/30 bg-[linear-gradient(145deg,#1b273a,#27344a)] p-4 text-white shadow-[0_10px_22px_rgba(17,29,46,0.2)]">
             <p className="text-[0.66rem] font-semibold uppercase tracking-[0.16em] text-[#a7c1e4]">{currentActivityCard.eyebrow}</p>
