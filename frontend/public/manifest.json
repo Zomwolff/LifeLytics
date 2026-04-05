@@ -1,0 +1,9 @@
+
+{
+  "name": "VitaLens",
+  "short_name": "Vita",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0F172A",
+  "theme_color": "#22C55E"
+}
