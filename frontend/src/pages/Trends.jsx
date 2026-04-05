@@ -39,10 +39,19 @@ function normalizeSeries(series, fallback) {
   return parsed.every((value) => Number.isFinite(value)) ? parsed : fallback;
 }
 
+function sumSeries(left, right) {
+  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== 7 || right.length !== 7) {
+    return null;
+  }
+
+  const result = left.map((value, index) => Number(value) + Number(right[index]));
+  return result.every((value) => Number.isFinite(value)) ? result : null;
+}
+
 export default function Trends({ user, goBack }) {
   const fallbackSleep = [6.5, 7.1, 6.8, 7.4, 7.0, 8.0, 7.6];
   const fallbackSteps = [6100, 7400, 6900, 8200, 9100, 10200, 8800];
-  const fallbackCaloriesBurnt = [360, 420, 390, 470, 530, 580, 505];
+  const fallbackCaloriesBurnt = [1940, 2025, 1982, 2080, 2154, 2210, 2117];
   const fallbackBloodGlucose = [102, 110, 106, 98, 104, 100, 96];
 
   const [weeklySleep, setWeeklySleep] = useState(fallbackSleep);
@@ -75,7 +84,19 @@ export default function Trends({ user, goBack }) {
         const data = await response.json();
         setWeeklySleep(normalizeSeries(data.weeklySleep, fallbackSleep));
         setWeeklySteps(normalizeSeries(data.weeklySteps, fallbackSteps));
-        setWeeklyCaloriesBurnt(normalizeSeries(data.weeklyCaloriesBurnt, fallbackCaloriesBurnt));
+        setWeeklyCaloriesBurnt((previous) => {
+          const normalizedTotal = normalizeSeries(data.weeklyTotalCaloriesBurnt, previous);
+          if (normalizedTotal !== previous) {
+            return normalizedTotal;
+          }
+
+          const fromComponents = sumSeries(data.weeklyActiveCaloriesBurnt, data.weeklyRestingCaloriesBurnt);
+          if (fromComponents) {
+            return fromComponents;
+          }
+
+          return normalizeSeries(data.weeklyCaloriesBurnt, previous);
+        });
         setWeeklyBloodGlucose(normalizeSeries(data.weeklyBloodGlucose, fallbackBloodGlucose));
       } catch {
         setTrendsError("Backend trends unavailable right now. Showing latest cached-style values.");
@@ -143,10 +164,10 @@ export default function Trends({ user, goBack }) {
           />
 
           <WeeklyBarChart
-            title="Calories Burnt"
+            title="Total Calories Burnt"
             unit="kcal"
             values={weeklyCaloriesBurnt}
-            maxValue={700}
+            maxValue={3000}
             colorClass="bg-[linear-gradient(180deg,#ffb17f,#f1884e)]"
           />
 

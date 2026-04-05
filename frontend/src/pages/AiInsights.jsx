@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
 function CircularMetric({ label, value, suffix, progress, color }) {
   const hasValue = Number.isFinite(value);
 
@@ -31,14 +33,54 @@ function CircularMetric({ label, value, suffix, progress, color }) {
   );
 }
 
+function normalizeSeries(series, fallback) {
+  if (!Array.isArray(series) || series.length !== 7) return fallback;
+  const parsed = series.map((value) => Number(value));
+  return parsed.every((value) => Number.isFinite(value)) ? parsed : fallback;
+}
+
+function sumSeries(left, right) {
+  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== 7 || right.length !== 7) {
+    return null;
+  }
+
+  const result = left.map((value, index) => Number(value) + Number(right[index]));
+  return result.every((value) => Number.isFinite(value)) ? result : null;
+}
+
+function findMaxIndex(values) {
+  let bestIndex = 0;
+  for (let index = 1; index < values.length; index += 1) {
+    if (values[index] > values[bestIndex]) {
+      bestIndex = index;
+    }
+  }
+  return bestIndex;
+}
+
+function findMinIndex(values) {
+  let bestIndex = 0;
+  for (let index = 1; index < values.length; index += 1) {
+    if (values[index] < values[bestIndex]) {
+      bestIndex = index;
+    }
+  }
+  return bestIndex;
+}
+
 export default function AiInsights({ user, goBack }) {
   const [selectedGoal, setSelectedGoal] = useState("Maintain Weight");
   const [recommendation, setRecommendation] = useState("Loading recommendation...");
   const [goalOutput, setGoalOutput] = useState("Loading goal output...");
   const [isLoadingInsights, setIsLoadingInsights] = useState(false);
   const [insightsError, setInsightsError] = useState("");
-  const [avgDailySteps, setAvgDailySteps] = useState(null);
-  const [avgDailyCaloriesBurnt, setAvgDailyCaloriesBurnt] = useState(null);
+  const [isLoadingTrends, setIsLoadingTrends] = useState(false);
+  const [trendsError, setTrendsError] = useState("");
+  const [activeActivityCard, setActiveActivityCard] = useState(0);
+  const [weeklySleep, setWeeklySleep] = useState([6.5, 7.1, 6.8, 7.4, 7.0, 8.0, 7.6]);
+  const [weeklySteps, setWeeklySteps] = useState([6100, 7400, 6900, 8200, 9100, 10200, 8800]);
+  const [weeklyCaloriesBurnt, setWeeklyCaloriesBurnt] = useState([1940, 2025, 1982, 2080, 2154, 2210, 2117]);
+  const [weeklyBloodGlucose, setWeeklyBloodGlucose] = useState([102, 110, 106, 98, 104, 100, 96]);
 
   const goals = [
     "Lose Weight ⚖️",
@@ -60,8 +102,6 @@ export default function AiInsights({ user, goBack }) {
   const bmiProgress = bmi ? Math.min(Math.max(bmi / 40, 0), 1) : 0;
   const heightProgress = heightValue ? Math.min(Math.max(heightValue / 220, 0), 1) : 0;
   const weightProgress = weightValue ? Math.min(Math.max(weightValue / 140, 0), 1) : 0;
-  const stepsProgress = Number.isFinite(avgDailySteps) ? Math.min(Math.max(avgDailySteps / 12000, 0), 1) : 0;
-  const caloriesBurntProgress = Number.isFinite(avgDailyCaloriesBurnt) ? Math.min(Math.max(avgDailyCaloriesBurnt / 1000, 0), 1) : 0;
 
   const normalizedGoal = useMemo(
     () => selectedGoal.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, "").trim(),
@@ -69,6 +109,51 @@ export default function AiInsights({ user, goBack }) {
   );
 
   const aiInsightsEndpoint = import.meta.env.VITE_AI_INSIGHTS_ENDPOINT || "/api/ai-insights";
+  const trendsEndpoint = import.meta.env.VITE_TRENDS_ENDPOINT || "/api/trends-weekly";
+
+  const activityCards = useMemo(() => {
+    const bestStepsIndex = findMaxIndex(weeklySteps);
+    const bestSleepIndex = findMaxIndex(weeklySleep);
+    const bestCaloriesIndex = findMaxIndex(weeklyCaloriesBurnt);
+    const bestGlucoseIndex = findMinIndex(weeklyBloodGlucose);
+
+    return [
+      {
+        id: "steps",
+        eyebrow: "Movement Highlight",
+        title: `You walked the max steps on ${DAYS[bestStepsIndex]}`,
+        value: `${Math.round(weeklySteps[bestStepsIndex])} steps`,
+        note: "Strong activity day. Repeat the same routine this week.",
+        chip: "bg-[linear-gradient(160deg,#49cfa7,#2f9f86)]",
+      },
+      {
+        id: "sleep",
+        eyebrow: "Sleep Highlight",
+        title: `You got the best sleep on ${DAYS[bestSleepIndex]}`,
+        value: `${weeklySleep[bestSleepIndex].toFixed(1)} hours`,
+        note: "Your recovery was best here. Mirror that bedtime pattern.",
+        chip: "bg-[linear-gradient(160deg,#6a8fff,#4c6ad8)]",
+      },
+      {
+        id: "calories",
+        eyebrow: "Burn Highlight",
+        title: `You burnt the most total calories on ${DAYS[bestCaloriesIndex]}`,
+        value: `${Math.round(weeklyCaloriesBurnt[bestCaloriesIndex])} kcal`,
+        note: "This includes active plus resting calories. Great full-day energy output.",
+        chip: "bg-[linear-gradient(160deg,#f3a06f,#dc7b44)]",
+      },
+      {
+        id: "glucose",
+        eyebrow: "Glucose Highlight",
+        title: `Your best glucose level was on ${DAYS[bestGlucoseIndex]}`,
+        value: `${Math.round(weeklyBloodGlucose[bestGlucoseIndex])} mg/dL`,
+        note: "Most stable reading this week. Keep meals and timing consistent.",
+        chip: "bg-[linear-gradient(160deg,#ef8ea8,#cb607a)]",
+      },
+    ];
+  }, [weeklyBloodGlucose, weeklyCaloriesBurnt, weeklySleep, weeklySteps]);
+
+  const currentActivityCard = activityCards[activeActivityCard] || activityCards[0];
 
   useEffect(() => {
     async function fetchInsights() {
@@ -100,14 +185,10 @@ export default function AiInsights({ user, goBack }) {
         const data = await response.json();
         setRecommendation(data.recommendation || "No recommendation returned by backend.");
         setGoalOutput(data.goalOutput || "No goal output returned by backend.");
-        setAvgDailySteps(Number.isFinite(data.avgDailySteps) ? data.avgDailySteps : null);
-        setAvgDailyCaloriesBurnt(Number.isFinite(data.avgDailyCaloriesBurnt) ? data.avgDailyCaloriesBurnt : null);
       } catch {
         setInsightsError("Backend insights unavailable right now.");
         setRecommendation("No recommendation available. Connect backend endpoint to load personalized insights.");
         setGoalOutput("No goal output available. Connect backend endpoint to load goal-specific advice.");
-        setAvgDailySteps(null);
-        setAvgDailyCaloriesBurnt(null);
       } finally {
         setIsLoadingInsights(false);
       }
@@ -115,6 +196,54 @@ export default function AiInsights({ user, goBack }) {
 
     fetchInsights();
   }, [aiInsightsEndpoint, bmi, heightValue, normalizedGoal, user?.age, user?.gender, user?.id, user?.name, weightValue]);
+
+  useEffect(() => {
+    async function fetchTrends() {
+      setIsLoadingTrends(true);
+      setTrendsError("");
+
+      try {
+        const response = await fetch(trendsEndpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            userId: user?.id ?? null,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Request failed with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        setWeeklySleep((previous) => normalizeSeries(data.weeklySleep, previous));
+        setWeeklySteps((previous) => normalizeSeries(data.weeklySteps, previous));
+        setWeeklyCaloriesBurnt((previous) => {
+          const normalizedTotal = normalizeSeries(data.weeklyTotalCaloriesBurnt, previous);
+          if (normalizedTotal !== previous) {
+            return normalizedTotal;
+          }
+
+          const fromComponents = sumSeries(data.weeklyActiveCaloriesBurnt, data.weeklyRestingCaloriesBurnt);
+          if (fromComponents) {
+            return fromComponents;
+          }
+
+          return normalizeSeries(data.weeklyCaloriesBurnt, previous);
+        });
+        setWeeklyBloodGlucose((previous) => normalizeSeries(data.weeklyBloodGlucose, previous));
+        setActiveActivityCard(0);
+      } catch {
+        setTrendsError("Trend highlights are using recent cached values right now.");
+      } finally {
+        setIsLoadingTrends(false);
+      }
+    }
+
+    fetchTrends();
+  }, [trendsEndpoint, user?.id]);
 
   return (
     <div
@@ -152,21 +281,48 @@ export default function AiInsights({ user, goBack }) {
 
         <section className="mt-3 rounded-[1.4rem] border border-white/35 bg-[rgba(255,255,255,0.62)] p-4 shadow-[0_10px_22px_rgba(31,43,64,0.14)]">
           <p className="text-sm font-semibold text-[#2b4467]">Daily Activity Snapshot</p>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <CircularMetric
-              label="Avg Daily Steps"
-              value={avgDailySteps}
-              suffix="steps"
-              progress={stepsProgress}
-              color="#5a9ef8"
-            />
-            <CircularMetric
-              label="Avg Daily Calories Burnt"
-              value={avgDailyCaloriesBurnt}
-              suffix="kcal"
-              progress={caloriesBurntProgress}
-              color="#f68f6f"
-            />
+          {isLoadingTrends ? <p className="mt-2 text-xs font-semibold text-[#3c5374]">Loading activity highlights...</p> : null}
+          {trendsError ? <p className="mt-2 text-xs font-semibold text-[#9e2f2f]">{trendsError}</p> : null}
+
+          <div className="mt-3 rounded-[1.2rem] border border-white/30 bg-[linear-gradient(145deg,#1b273a,#27344a)] p-4 text-white shadow-[0_10px_22px_rgba(17,29,46,0.2)]">
+            <p className="text-[0.66rem] font-semibold uppercase tracking-[0.16em] text-[#a7c1e4]">{currentActivityCard.eyebrow}</p>
+            <p className="mt-2 text-[1.03rem] font-bold leading-[1.2]" style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}>
+              {currentActivityCard.title}
+            </p>
+            <p className={`mt-3 inline-block rounded-lg px-3 py-2 text-sm font-bold text-white ${currentActivityCard.chip}`}>
+              {currentActivityCard.value}
+            </p>
+            <p className="mt-3 text-sm leading-relaxed text-[#d6e4f8]">{currentActivityCard.note}</p>
+
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveActivityCard((previous) => (previous - 1 + activityCards.length) % activityCards.length)}
+                className="rounded-lg border border-[#758fb0] bg-white/10 px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.1em] text-[#e9f2ff]"
+              >
+                Previous
+              </button>
+
+              <div className="flex items-center gap-2">
+                {activityCards.map((card, index) => (
+                  <button
+                    key={card.id}
+                    type="button"
+                    onClick={() => setActiveActivityCard(index)}
+                    aria-label={`Show ${card.id} highlight`}
+                    className={`h-2.5 w-2.5 rounded-full ${index === activeActivityCard ? "bg-[#8fd0ff]" : "bg-white/35"}`}
+                  />
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveActivityCard((previous) => (previous + 1) % activityCards.length)}
+                className="rounded-lg border border-[#758fb0] bg-white/10 px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.1em] text-[#e9f2ff]"
+              >
+                Next
+              </button>
+            </div>
           </div>
         </section>
 
