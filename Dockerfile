@@ -25,7 +25,7 @@ COPY backend/ ./backend/
 
 # Firebase service-account key (mount as secret in prod; baked-in for local dev)
 # If you use Docker Compose, prefer a bind-mount or secret over baking this in.
-COPY lifelytics-e92fd-firebase-adminsdk-fbsvc-cf79d1af99.json ./
+#COPY lifelytics-e92fd-firebase-adminsdk-fbsvc-cf79d1af99.json ./
 
 # Runtime env defaults (override at `docker run` / Compose time)
 ENV PYTHONUNBUFFERED=1 \
