@@ -4,7 +4,7 @@ import Startup from "./pages/Startup";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Home from "./pages/Home";
-import { getSessionUser, loginUser, logoutUser, registerUser } from "./auth";
+import { getSessionUser, loginUser, logoutUser, registerUser, subscribeToAuthChanges } from "./auth";
 
 export default function App() {
   const [page, setPage] = useState("startup");
@@ -16,6 +16,18 @@ export default function App() {
       setUser(sessionUser);
       setPage("home");
     }
+
+    const unsubscribe = subscribeToAuthChanges((nextUser) => {
+      if (nextUser) {
+        setUser(nextUser);
+        setPage("home");
+      } else {
+        setUser(null);
+        setPage("startup");
+      }
+    });
+
+    return unsubscribe;
   }, []);
 
   async function handleLogin(payload) {

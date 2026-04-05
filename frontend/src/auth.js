@@ -1,6 +1,8 @@
 const USERS_KEY = "lifelytics_users_v1";
+const SESSION_KEY = "lifelytics_session_v1";
 const SESSION_COOKIE = "lifelytics_session";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
+const AUTH_CHANGED_EVENT = "lifelytics-auth-changed";
 
 function loadUsers() {
   try {
@@ -41,6 +43,18 @@ function setSessionCookie(userId) {
   document.cookie = `${SESSION_COOKIE}=${encodeURIComponent(userId)}; Max-Age=${SESSION_MAX_AGE_SECONDS}; Path=/; SameSite=Lax`;
 }
 
+function setSessionStorage(userId) {
+  localStorage.setItem(SESSION_KEY, userId);
+}
+
+function clearSessionStorage() {
+  localStorage.removeItem(SESSION_KEY);
+}
+
+function notifyAuthChanged() {
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+}
+
 function getCookie(name) {
   const needle = `${name}=`;
   return document.cookie
@@ -52,6 +66,35 @@ function getCookie(name) {
 
 function clearSessionCookie() {
   document.cookie = `${SESSION_COOKIE}=; Max-Age=0; Path=/; SameSite=Lax`;
+}
+
+function getStoredSessionId() {
+  const localSessionId = localStorage.getItem(SESSION_KEY);
+  if (localSessionId) {
+    return localSessionId;
+  }
+
+  const cookieSessionId = getCookie(SESSION_COOKIE);
+  if (!cookieSessionId) {
+    return null;
+  }
+
+  const decoded = decodeURIComponent(cookieSessionId);
+  // Migrate cookie-only sessions into localStorage for cross-tab consistency.
+  setSessionStorage(decoded);
+  return decoded;
+}
+
+function setSession(userId) {
+  setSessionStorage(userId);
+  setSessionCookie(userId);
+  notifyAuthChanged();
+}
+
+function clearSession() {
+  clearSessionStorage();
+  clearSessionCookie();
+  notifyAuthChanged();
 }
 
 function toSafeUser(user) {
@@ -101,7 +144,7 @@ export async function registerUser({ name, email, password, confirmPassword }) {
 
   users.push(user);
   saveUsers(users);
-  setSessionCookie(user.id);
+  setSession(user.id);
   return { ok: true, user: toSafeUser(user) };
 }
 
@@ -119,22 +162,41 @@ export async function loginUser({ email, password }) {
     return { ok: false, error: "Incorrect password." };
   }
 
-  setSessionCookie(user.id);
+  setSession(user.id);
   return { ok: true, user: toSafeUser(user) };
 }
 
 export function getSessionUser() {
-  const sessionId = getCookie(SESSION_COOKIE);
+  const sessionId = getStoredSessionId();
   if (!sessionId) {
     return null;
   }
 
-  const userId = decodeURIComponent(sessionId);
   const users = loadUsers();
-  const user = users.find((u) => u.id === userId);
+  const user = users.find((u) => u.id === sessionId);
   return user ? toSafeUser(user) : null;
 }
 
 export function logoutUser() {
-  clearSessionCookie();
+  clearSession();
+}
+
+export function subscribeToAuthChanges(callback) {
+  function handleStorage(event) {
+    if (event.key === SESSION_KEY || event.key === USERS_KEY || event.key === null) {
+      callback(getSessionUser());
+    }
+  }
+
+  function handleAuthChanged() {
+    callback(getSessionUser());
+  }
+
+  window.addEventListener("storage", handleStorage);
+  window.addEventListener(AUTH_CHANGED_EVENT, handleAuthChanged);
+
+  return () => {
+    window.removeEventListener("storage", handleStorage);
+    window.removeEventListener(AUTH_CHANGED_EVENT, handleAuthChanged);
+  };
 }

@@ -1,7 +1,8 @@
 
 import { motion } from "framer-motion";
 
-export default function Home({ user }) {
+export default function Home({ user, goChat }) {
+
   return (
     <div
       className="relative min-h-screen overflow-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-4 py-6"
@@ -138,13 +139,30 @@ export default function Home({ user }) {
           </section>
         </main>
 
-        <div className="mt-auto rounded-[1rem] border border-[#a3b3cb] bg-[rgba(255,255,255,0.56)] px-3 py-2 shadow-[0_8px_20px_rgba(31,43,64,0.14)] backdrop-blur-[2px]">
-          <div className="flex items-center justify-between text-[#3a4c68]">
-            <button className="grid h-9 w-9 place-items-center rounded-[0.6rem] border border-[#6a7f9f] text-3xl leading-none text-[#21314a]">
-              +
-            </button>
-            <span className="text-3xl">⌕</span>
-          </div>
+        <div className="mt-auto">
+          <button
+            type="button"
+            onClick={goChat}
+            className="w-full rounded-[1rem] border border-[#a3b3cb] bg-[rgba(255,255,255,0.56)] px-3 py-2 text-left shadow-[0_8px_20px_rgba(31,43,64,0.14)] backdrop-blur-[2px]"
+          >
+            <div className="flex items-center gap-2 text-[#3a4c68]">
+              <span className="grid h-9 w-9 place-items-center rounded-[0.6rem] border border-[#6a7f9f] text-3xl leading-none text-[#21314a]">
+                +
+              </span>
+              <input
+                readOnly
+                onFocus={goChat}
+                placeholder="Ask LifeLytics assistant..."
+                className="h-9 w-full cursor-text rounded-[0.7rem] border border-[#b7c5d9] bg-[rgba(255,255,255,0.65)] px-3 text-sm font-medium text-[#1a2b43] outline-none placeholder:text-[#667a98]"
+              />
+              <span className="grid h-9 w-9 place-items-center rounded-[0.6rem] border border-[#6a7f9f] text-[#21314a]">
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12h13" />
+                  <path d="M13 5l7 7-7 7" />
+                </svg>
+              </span>
+            </div>
+          </button>
         </div>
       </motion.div>
     </div>
