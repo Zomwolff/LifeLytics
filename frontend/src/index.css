@@ -3,4 +3,21 @@
 @tailwind components;
 @tailwind utilities;
 
-body { background: #f1f5f9; }
+html,
+body,
+#root {
+	min-height: 100%;
+}
+
+body {
+	margin: 0;
+	background:
+		radial-gradient(circle at top left, rgba(56, 189, 248, 0.18), transparent 34%),
+		radial-gradient(circle at bottom right, rgba(15, 23, 42, 0.1), transparent 32%),
+		#dfe6ef;
+	color: #0f172a;
+}
+
+* {
+	box-sizing: border-box;
+}
