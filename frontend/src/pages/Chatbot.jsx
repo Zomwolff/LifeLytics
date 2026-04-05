@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
+import { apiFetch } from "../api/client";
 
 export default function Chatbot({ user, goBack }) {
   // TODO: Flip this to true (or derive from env/config) once chatbot backend is connected.
-  const isBackendConnected = false;
+  const isBackendConnected = true;
 
   const [chatInput, setChatInput] = useState("");
   const [messages, setMessages] = useState([
@@ -39,15 +40,23 @@ export default function Chatbot({ user, goBack }) {
       return;
     }
 
-    // TODO: Replace fallback with real backend call.
-    // Example integration point:
-    // const response = await fetch("/api/chat", {
-    //   method: "POST",
-    //   headers: { "Content-Type": "application/json" },
-    //   body: JSON.stringify({ userId: user?.id, message: text }),
-    // });
-    // const data = await response.json();
-    // setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", text: data.reply }]);
+    try {
+      const data = await apiFetch("/chatbot/", {
+        method: "POST",
+        body: JSON.stringify({ message: text }),
+      });
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        text: data.response,
+      }]);
+    } catch {
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        text: "Unable to reach backend right now.",
+      }]);
+    }
   }
 
   return (

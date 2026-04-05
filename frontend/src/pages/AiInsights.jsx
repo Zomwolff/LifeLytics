@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
+import { apiFetch } from "../api/client";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -155,95 +156,53 @@ export default function AiInsights({ user, goBack }) {
 
   const currentActivityCard = activityCards[activeActivityCard] || activityCards[0];
 
-  useEffect(() => {
-    async function fetchInsights() {
-      setIsLoadingInsights(true);
-      setInsightsError("");
-
-      try {
-        const response = await fetch(aiInsightsEndpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            userId: user?.id ?? null,
-            name: user?.name ?? null,
-            age: user?.age ?? null,
-            gender: user?.gender ?? null,
-            heightCm: heightValue,
-            weightKg: weightValue,
-            bmi,
-            selectedGoal: normalizedGoal,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`Request failed with status ${response.status}`);
-        }
-
-        const data = await response.json();
-        setRecommendation(data.recommendation || "No recommendation returned by backend.");
-        setGoalOutput(data.goalOutput || "No goal output returned by backend.");
-      } catch {
-        setInsightsError("Backend insights unavailable right now.");
-        setRecommendation("No recommendation available. Connect backend endpoint to load personalized insights.");
-        setGoalOutput("No goal output available. Connect backend endpoint to load goal-specific advice.");
-      } finally {
-        setIsLoadingInsights(false);
-      }
+ useEffect(() => {
+  async function fetchInsights() {
+    setIsLoadingInsights(true);
+    setInsightsError("");
+    try {
+      const data = await apiFetch("/insights/", { method: "POST" });
+      setRecommendation(data.explanation || data.recommendations?.[0] || "No recommendation returned.");
+      setGoalOutput(
+        data.recommendations?.find(r => r.toLowerCase().includes(normalizedGoal.toLowerCase()))
+        || data.recommendations?.[0]
+        || "No goal output returned."
+      );
+    } catch {
+      setInsightsError("Backend insights unavailable right now.");
+      setRecommendation("No recommendation available.");
+      setGoalOutput("No goal output available.");
+    } finally {
+      setIsLoadingInsights(false);
     }
-
-    fetchInsights();
-  }, [aiInsightsEndpoint, bmi, heightValue, normalizedGoal, user?.age, user?.gender, user?.id, user?.name, weightValue]);
+  }
+  fetchInsights();
+}, [normalizedGoal]);
 
   useEffect(() => {
-    async function fetchTrends() {
-      setIsLoadingTrends(true);
-      setTrendsError("");
-
-      try {
-        const response = await fetch(trendsEndpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            userId: user?.id ?? null,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`Request failed with status ${response.status}`);
-        }
-
-        const data = await response.json();
-        setWeeklySleep((previous) => normalizeSeries(data.weeklySleep, previous));
-        setWeeklySteps((previous) => normalizeSeries(data.weeklySteps, previous));
-        setWeeklyCaloriesBurnt((previous) => {
-          const normalizedTotal = normalizeSeries(data.weeklyTotalCaloriesBurnt, previous);
-          if (normalizedTotal !== previous) {
-            return normalizedTotal;
-          }
-
-          const fromComponents = sumSeries(data.weeklyActiveCaloriesBurnt, data.weeklyRestingCaloriesBurnt);
-          if (fromComponents) {
-            return fromComponents;
-          }
-
-          return normalizeSeries(data.weeklyCaloriesBurnt, previous);
-        });
-        setWeeklyBloodGlucose((previous) => normalizeSeries(data.weeklyBloodGlucose, previous));
-        setActiveActivityCard(0);
-      } catch {
-        setTrendsError("Trend highlights are using recent cached values right now.");
-      } finally {
-        setIsLoadingTrends(false);
-      }
+  async function fetchTrends() {
+    setIsLoadingTrends(true);
+    setTrendsError("");
+    try {
+      const data = await apiFetch("/health/trends", { method: "GET" });
+      setWeeklySleep(prev => normalizeSeries(data.weeklySleep, prev));
+      setWeeklySteps(prev => normalizeSeries(data.weeklySteps, prev));
+      setWeeklyCaloriesBurnt(prev => {
+        const total = normalizeSeries(data.weeklyTotalCaloriesBurnt, prev);
+        if (total !== prev) return total;
+        const combined = sumSeries(data.weeklyActiveCaloriesBurnt, data.weeklyRestingCaloriesBurnt);
+        return combined || normalizeSeries(data.weeklyCaloriesBurnt, prev);
+      });
+      setWeeklyBloodGlucose(prev => normalizeSeries(data.weeklyBloodGlucose, prev));
+      setActiveActivityCard(0);
+    } catch {
+      setTrendsError("Trend highlights are using recent cached values right now.");
+    } finally {
+      setIsLoadingTrends(false);
     }
-
-    fetchTrends();
-  }, [trendsEndpoint, user?.id]);
+  }
+  fetchTrends();
+}, [user?.id]);
 
   return (
     <div

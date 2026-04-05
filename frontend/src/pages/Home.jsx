@@ -1,4 +1,4 @@
-
+import { apiFetch } from "../api/client";
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 
@@ -21,8 +21,6 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
   const bmiProgress = bmi ? Math.min(Math.max(bmi / 40, 0), 1) : 0;
   const bmiArcColor = !bmi ? "#7ebeff" : bmi < 18.5 ? "#7ebeff" : bmi <= 24.9 ? "#6de1a7" : bmi <= 29.9 ? "#f6c96f" : "#f08a8a";
   const bmiCategory = !bmi ? "No data" : bmi < 18.5 ? "Underweight" : bmi <= 24.9 ? "Normal" : bmi <= 29.9 ? "Overweight" : "Obese";
-  const prescriptionScanEndpoint = import.meta.env.VITE_PRESCRIPTION_SCAN_ENDPOINT || "/api/prescription-scan";
-  const prescriptionFollowUpEndpoint = import.meta.env.VITE_PRESCRIPTION_FOLLOW_UP_ENDPOINT || "/api/prescription-follow-up";
 
   useEffect(() => {
     return () => {
@@ -104,26 +102,14 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
     try {
       const imageDataUrl = await fileToDataUrl(selectedPrescriptionFile);
 
-      const response = await fetch(prescriptionScanEndpoint, {
+      const form = new FormData();
+      form.append("file", selectedPrescriptionFile);
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ""}/upload/report`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          userId: user?.id || null,
-          userName: user?.name || null,
-          imageDataUrl,
-          fileName: selectedPrescriptionFile.name,
-          fileType: selectedPrescriptionFile.type,
-          fileSize: selectedPrescriptionFile.size,
-        }),
+        body: form,
       });
-
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-      }
-
-      const data = await response.json();
+      if (!res.ok) throw new Error(`${res.status}`);
+      const data = await res.json();
       const normalizedStatus = normalizeReportStatus(data.status);
       const followUpItems = Array.isArray(data.followUps)
         ? data.followUps
@@ -153,24 +139,14 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
     setScanError("");
 
     try {
-      const response = await fetch(prescriptionFollowUpEndpoint, {
+      const data = await apiFetch("/upload/follow-up", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify({
-          userId: user?.id || null,
           scanId: scanResult.scanId,
           currentStatus: scanResult.status,
           followUpHistory,
         }),
       });
-
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-      }
-
-      const data = await response.json();
       const normalizedStatus = normalizeReportStatus(data.status || scanResult.status);
       const nextMessage = data.followUpMessage || "Continue the plan and recheck after your next cycle.";
 

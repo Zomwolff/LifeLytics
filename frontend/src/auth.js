@@ -1,3 +1,10 @@
+import { auth } from "./firebase";
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+} from "firebase/auth";
+
 const USERS_KEY = "lifelytics_users_v1";
 const SESSION_KEY = "lifelytics_session_v1";
 const SESSION_COOKIE = "lifelytics_session";
@@ -113,65 +120,79 @@ export async function registerUser({ name, email, password, confirmPassword }) {
   const cleanName = name.trim();
   const cleanEmail = normalizeEmail(email);
 
-  if (!cleanName) {
-    return { ok: false, error: "Name is required." };
-  }
-
-  if (!cleanEmail || !cleanEmail.includes("@")) {
-    return { ok: false, error: "Enter a valid email." };
-  }
-
-  if (password.length < 8) {
-    return { ok: false, error: "Password must be at least 8 characters." };
-  }
-
-  if (password !== confirmPassword) {
-    return { ok: false, error: "Passwords do not match." };
-  }
+  if (!cleanName) return { ok: false, error: "Name is required." };
+  if (!cleanEmail || !cleanEmail.includes("@")) return { ok: false, error: "Enter a valid email." };
+  if (password.length < 8) return { ok: false, error: "Password must be at least 8 characters." };
+  if (password !== confirmPassword) return { ok: false, error: "Passwords do not match." };
 
   const users = loadUsers();
   const exists = users.some((u) => u.email === cleanEmail);
-  if (exists) {
-    return { ok: false, error: "An account with this email already exists." };
+  if (exists) return { ok: false, error: "An account with this email already exists." };
+
+  try {
+    const credential = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+    const firebaseUid = credential.user.uid;
+
+    const salt = randomSalt();
+    const passwordHash = await hashPassword(password, salt);
+    const user = {
+      id: firebaseUid,          // use Firebase UID as local ID
+      name: cleanName,
+      email: cleanEmail,
+      age: null,
+      gender: null,
+      heightCm: null,
+      weightKg: null,
+      passwordHash,
+      salt,
+      createdAt: new Date().toISOString(),
+    };
+
+    users.push(user);
+    saveUsers(users);
+    setSession(firebaseUid);
+    return { ok: true, user: toSafeUser(user) };
+  } catch (err) {
+    const msg = err.code === "auth/email-already-in-use"
+      ? "An account with this email already exists."
+      : err.message;
+    return { ok: false, error: msg };
   }
-
-  const salt = randomSalt();
-  const passwordHash = await hashPassword(password, salt);
-  const user = {
-    id: crypto.randomUUID(),
-    name: cleanName,
-    email: cleanEmail,
-    age: null,
-    gender: null,
-    heightCm: null,
-    weightKg: null,
-    passwordHash,
-    salt,
-    createdAt: new Date().toISOString(),
-  };
-
-  users.push(user);
-  saveUsers(users);
-  setSession(user.id);
-  return { ok: true, user: toSafeUser(user) };
 }
 
 export async function loginUser({ email, password }) {
   const cleanEmail = normalizeEmail(email);
-  const users = loadUsers();
-  const user = users.find((u) => u.email === cleanEmail);
 
-  if (!user) {
-    return { ok: false, error: "No account found for this email." };
+  try {
+    const credential = await signInWithEmailAndPassword(auth, cleanEmail, password);
+    const firebaseUid = credential.user.uid;
+
+    const users = loadUsers();
+    let user = users.find((u) => u.id === firebaseUid);
+
+    // Fallback: match by email for accounts created before Firebase sync
+    if (!user) user = users.find((u) => u.email === cleanEmail);
+    if (!user) return { ok: false, error: "No local profile found. Please sign up again." };
+
+    // Ensure local ID matches Firebase UID
+    if (user.id !== firebaseUid) {
+      const index = users.findIndex((u) => u.email === cleanEmail);
+      users[index] = { ...users[index], id: firebaseUid };
+      saveUsers(users);
+      user = users[index];
+    }
+
+    setSession(firebaseUid);
+    return { ok: true, user: toSafeUser(user) };
+  } catch (err) {
+    const msg =
+      err.code === "auth/invalid-credential" || err.code === "auth/wrong-password"
+        ? "Incorrect email or password."
+        : err.code === "auth/user-not-found"
+        ? "No account found for this email."
+        : err.message;
+    return { ok: false, error: msg };
   }
-
-  const passwordHash = await hashPassword(password, user.salt);
-  if (passwordHash !== user.passwordHash) {
-    return { ok: false, error: "Incorrect password." };
-  }
-
-  setSession(user.id);
-  return { ok: true, user: toSafeUser(user) };
 }
 
 export function getSessionUser() {
@@ -185,7 +206,8 @@ export function getSessionUser() {
   return user ? toSafeUser(user) : null;
 }
 
-export function logoutUser() {
+export async function logoutUser() {
+  try { await signOut(auth); } catch { /* no-op */ }
   clearSession();
 }
 

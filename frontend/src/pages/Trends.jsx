@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import { apiFetch } from "../api/client";
 
 function WeeklyBarChart({ title, unit, values, maxValue, colorClass }) {
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -61,7 +62,6 @@ export default function Trends({ user, goBack }) {
   const [isLoadingTrends, setIsLoadingTrends] = useState(false);
   const [trendsError, setTrendsError] = useState("");
 
-  const trendsEndpoint = import.meta.env.VITE_TRENDS_ENDPOINT || "/api/trends-weekly";
 
   useEffect(() => {
     async function fetchWeeklyTrends() {
@@ -69,19 +69,7 @@ export default function Trends({ user, goBack }) {
       setTrendsError("");
 
       try {
-        const response = await fetch(trendsEndpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ userId: user?.id ?? null }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`Request failed with status ${response.status}`);
-        }
-
-        const data = await response.json();
+        const data = await apiFetch("/health/trends", { method: "GET" });
         setWeeklySleep(normalizeSeries(data.weeklySleep, fallbackSleep));
         setWeeklySteps(normalizeSeries(data.weeklySteps, fallbackSteps));
         setWeeklyCaloriesBurnt((previous) => {
