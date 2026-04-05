@@ -1,15 +1,202 @@
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 
-export default function Home({ user, goHome, goChat, goMetrics, goProfile, onLogout }) {
+export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProfile, goAi, onLogout }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isPrescriptionModalOpen, setIsPrescriptionModalOpen] = useState(false);
+  const [selectedPrescriptionFile, setSelectedPrescriptionFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [isScanningPrescription, setIsScanningPrescription] = useState(false);
+  const [scanError, setScanError] = useState("");
+  const [scanResult, setScanResult] = useState(null);
+  const [followUpHistory, setFollowUpHistory] = useState([]);
+  const [isFetchingFollowUp, setIsFetchingFollowUp] = useState(false);
+  const uploadInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
   const bmi = Number.isFinite(user?.heightCm) && Number.isFinite(user?.weightKg)
     ? user.weightKg / ((user.heightCm / 100) * (user.heightCm / 100))
     : null;
   const bmiProgress = bmi ? Math.min(Math.max(bmi / 40, 0), 1) : 0;
   const bmiArcColor = !bmi ? "#7ebeff" : bmi < 18.5 ? "#7ebeff" : bmi <= 24.9 ? "#6de1a7" : bmi <= 29.9 ? "#f6c96f" : "#f08a8a";
+  const bmiCategory = !bmi ? "No data" : bmi < 18.5 ? "Underweight" : bmi <= 24.9 ? "Normal" : bmi <= 29.9 ? "Overweight" : "Obese";
+  const prescriptionScanEndpoint = import.meta.env.VITE_PRESCRIPTION_SCAN_ENDPOINT || "/api/prescription-scan";
+  const prescriptionFollowUpEndpoint = import.meta.env.VITE_PRESCRIPTION_FOLLOW_UP_ENDPOINT || "/api/prescription-follow-up";
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
+
+  async function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Failed to read image file."));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function handlePrescriptionFileChange(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setScanError("Please choose an image file.");
+      event.target.value = "";
+      return;
+    }
+
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
+
+    const nextPreviewUrl = URL.createObjectURL(file);
+    setSelectedPrescriptionFile(file);
+    setPreviewUrl(nextPreviewUrl);
+    setScanResult(null);
+    setFollowUpHistory([]);
+    setScanError("");
+    event.target.value = "";
+  }
+
+  function normalizeReportStatus(rawStatus) {
+    const normalized = String(rawStatus || "").trim().toLowerCase();
+    if (["good", "normal", "healthy"].includes(normalized)) return "good";
+    if (["deficiency", "deficient", "low"].includes(normalized)) return "deficiency";
+    if (["superficiency", "surplus", "high", "excess"].includes(normalized)) return "superficiency";
+    return "unknown";
+  }
+
+  function statusLabel(status) {
+    if (status === "good") return "Good";
+    if (status === "deficiency") return "Deficiency";
+    if (status === "superficiency") return "Superficiency";
+    return "Pending Review";
+  }
+
+  function statusStyles(status) {
+    if (status === "good") {
+      return "border-[#8ad8b2] bg-[#ecfbf3] text-[#0f6c46]";
+    }
+    if (status === "deficiency") {
+      return "border-[#f1c07e] bg-[#fff7ea] text-[#8b5605]";
+    }
+    if (status === "superficiency") {
+      return "border-[#f2a3a3] bg-[#fff0f0] text-[#8f2b2b]";
+    }
+    return "border-[#b5c3d8] bg-[#f2f6fc] text-[#324864]";
+  }
+
+  async function handleScanPrescription() {
+    if (!selectedPrescriptionFile) {
+      setScanError("Upload or take a photo before scanning.");
+      return;
+    }
+
+    setIsScanningPrescription(true);
+    setScanError("");
+
+    try {
+      const imageDataUrl = await fileToDataUrl(selectedPrescriptionFile);
+
+      const response = await fetch(prescriptionScanEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: user?.id || null,
+          userName: user?.name || null,
+          imageDataUrl,
+          fileName: selectedPrescriptionFile.name,
+          fileType: selectedPrescriptionFile.type,
+          fileSize: selectedPrescriptionFile.size,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+
+      const data = await response.json();
+      const normalizedStatus = normalizeReportStatus(data.status);
+      const followUpItems = Array.isArray(data.followUps)
+        ? data.followUps
+        : data.followUpMessage
+          ? [data.followUpMessage]
+          : [];
+
+      setScanResult({
+        scanId: data.scanId || null,
+        status: normalizedStatus,
+        summary: data.summary || "Scan complete.",
+        details: data.details || data.findings || "",
+        nextCheckIn: data.nextCheckIn || data.nextCheckInDays || null,
+      });
+      setFollowUpHistory(followUpItems);
+    } catch {
+      setScanError("Unable to scan right now. Connect backend endpoint to process report images.");
+    } finally {
+      setIsScanningPrescription(false);
+    }
+  }
+
+  async function handleFollowUp() {
+    if (!scanResult) return;
+
+    setIsFetchingFollowUp(true);
+    setScanError("");
+
+    try {
+      const response = await fetch(prescriptionFollowUpEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: user?.id || null,
+          scanId: scanResult.scanId,
+          currentStatus: scanResult.status,
+          followUpHistory,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+
+      const data = await response.json();
+      const normalizedStatus = normalizeReportStatus(data.status || scanResult.status);
+      const nextMessage = data.followUpMessage || "Continue the plan and recheck after your next cycle.";
+
+      setFollowUpHistory((prev) => [...prev, nextMessage]);
+      setScanResult((prev) => (
+        prev
+          ? {
+              ...prev,
+              status: normalizedStatus,
+              summary: data.summary || prev.summary,
+              details: data.details || prev.details,
+              nextCheckIn: data.nextCheckIn || data.nextCheckInDays || prev.nextCheckIn,
+            }
+          : prev
+      ));
+    } catch {
+      setScanError("Unable to fetch follow-up right now.");
+    } finally {
+      setIsFetchingFollowUp(false);
+    }
+  }
+
+  function closePrescriptionModal() {
+    setIsPrescriptionModalOpen(false);
+    setScanError("");
+  }
 
   return (
     <div
@@ -118,6 +305,17 @@ export default function Home({ user, goHome, goChat, goMetrics, goProfile, onLog
                   onClick={() => {
                     setIsMenuOpen(false);
                     setIsProfileMenuOpen(false);
+                    goTrends();
+                  }}
+                  className="w-full border-t border-[#d0d9e8] px-3 py-2 text-left text-sm font-semibold text-[#20314a] hover:bg-[#eef3fb]"
+                >
+                  Trends
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    setIsProfileMenuOpen(false);
                     goChat();
                   }}
                   className="w-full border-t border-[#d0d9e8] px-3 py-2 text-left text-sm font-semibold text-[#20314a] hover:bg-[#eef3fb]"
@@ -143,18 +341,18 @@ export default function Home({ user, goHome, goChat, goMetrics, goProfile, onLog
           <button
             type="button"
             onClick={goMetrics}
-            className="row-span-2 min-h-[222px] rounded-[1.5rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] p-4 text-left text-white shadow-[0_12px_26px_rgba(17,29,46,0.28)]"
+            className="row-span-2 min-h-[222px] rounded-[1.5rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 pb-4 pt-6 text-left text-white shadow-[0_12px_26px_rgba(17,29,46,0.28)]"
           >
             <div className="mb-5 grid place-items-center">
-              <svg viewBox="0 0 120 62" className="h-16 w-full max-w-[176px]" fill="none" aria-hidden="true">
+              <svg viewBox="0 0 120 70" className="h-16 w-full max-w-[176px]" fill="none" aria-hidden="true">
                 <path
-                  d="M12 50a48 48 0 0 1 96 0"
+                  d="M12 56a48 48 0 0 1 96 0"
                   stroke="rgba(158,207,255,0.35)"
                   strokeWidth="7"
                   strokeLinecap="round"
                 />
                 <path
-                  d="M12 50a48 48 0 0 1 96 0"
+                  d="M12 56a48 48 0 0 1 96 0"
                   strokeWidth="7"
                   strokeLinecap="round"
                   pathLength="100"
@@ -164,10 +362,13 @@ export default function Home({ user, goHome, goChat, goMetrics, goProfile, onLog
               </svg>
             </div>
             <p
-              className="-mt-12 mb-6 text-center text-[3rem] font-bold tracking-[-0.02em]"
+              className="-mt-9 mb-6 text-center text-[3rem] font-bold tracking-[-0.02em]"
               style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}
             >
               {bmi ? bmi.toFixed(1) : "--"}
+            </p>
+            <p className="-mt-5 mb-5 text-center text-[0.8rem] font-semibold uppercase tracking-[0.12em] text-[#c3daf7]">
+              {bmiCategory}
             </p>
             <div className="space-y-1 text-[0.98rem] font-semibold leading-tight text-[#e8efff]">
               <p>Height : {Number.isFinite(user?.heightCm) ? `${user.heightCm} cm` : "-"}</p>
@@ -176,7 +377,11 @@ export default function Home({ user, goHome, goChat, goMetrics, goProfile, onLog
             </div>
           </button>
 
-          <section className="min-h-[104px] rounded-[1.25rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)]">
+          <button
+            type="button"
+            onClick={goAi}
+            className="min-h-[104px] rounded-[1.25rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-left text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)]"
+          >
             <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M12 2a6 6 0 0 0-3.8 10.7c1 .8 1.8 2 1.8 3.3h4c0-1.3.8-2.5 1.8-3.3A6 6 0 0 0 12 2z" />
               <path d="M9.5 19h5" />
@@ -194,9 +399,13 @@ export default function Home({ user, goHome, goChat, goMetrics, goProfile, onLog
             >
               Insights
             </p>
-          </section>
+          </button>
 
-          <section className="min-h-[104px] rounded-[1.25rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)]">
+          <button
+            type="button"
+            onClick={goTrends}
+            className="min-h-[104px] rounded-[1.25rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-left text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)]"
+          >
             <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.2">
               <path d="M3 17l6-6 4 4 7-7" />
               <path d="M14 8h6v6" />
@@ -207,9 +416,13 @@ export default function Home({ user, goHome, goChat, goMetrics, goProfile, onLog
             >
               Trends
             </p>
-          </section>
+          </button>
 
-          <section className="col-span-2 min-h-[106px] rounded-[1.35rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)]">
+          <button
+            type="button"
+            onClick={() => setIsPrescriptionModalOpen(true)}
+            className="col-span-2 min-h-[106px] rounded-[1.35rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-left text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)]"
+          >
             <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="7" width="18" height="13" rx="2" />
               <path d="M8 7l1.3-2h5.4L16 7" />
@@ -221,7 +434,7 @@ export default function Home({ user, goHome, goChat, goMetrics, goProfile, onLog
             >
               Prescription Insights
             </p>
-          </section>
+          </button>
         </main>
 
         <div className="mt-auto">
@@ -250,6 +463,120 @@ export default function Home({ user, goHome, goChat, goMetrics, goProfile, onLog
           </button>
         </div>
       </motion.div>
+
+      {isPrescriptionModalOpen ? (
+        <div className="fixed inset-0 z-30 grid place-items-center bg-[rgba(10,20,34,0.56)] px-4">
+          <div className="w-full max-w-[430px] rounded-[1.4rem] border border-[#c3d1e3] bg-[linear-gradient(160deg,#f7fbff,#e7f0fb)] p-4 shadow-[0_20px_44px_rgba(7,19,36,0.35)]">
+            <div className="mb-3 flex items-center justify-between">
+              <p
+                className="text-[1.08rem] font-bold text-[#16233a]"
+                style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}
+              >
+                Prescription Scan
+              </p>
+              <button
+                type="button"
+                onClick={closePrescriptionModal}
+                className="rounded-full border border-[#9db0c9] bg-white/80 px-2 py-1 text-xs font-semibold text-[#29405e]"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => uploadInputRef.current?.click()}
+                className="rounded-xl border border-[#adbdd4] bg-white/80 px-3 py-2 text-sm font-semibold text-[#223752]"
+              >
+                Upload Photo
+              </button>
+              <button
+                type="button"
+                onClick={() => cameraInputRef.current?.click()}
+                className="rounded-xl border border-[#adbdd4] bg-white/80 px-3 py-2 text-sm font-semibold text-[#223752]"
+              >
+                Take Photo
+              </button>
+            </div>
+
+            <input
+              ref={uploadInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handlePrescriptionFileChange}
+              className="hidden"
+            />
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handlePrescriptionFileChange}
+              className="hidden"
+            />
+
+            <div className="mt-3 min-h-[120px] rounded-xl border border-[#bccbdd] bg-white/70 p-2">
+              {previewUrl ? (
+                <img src={previewUrl} alt="Selected report" className="h-32 w-full rounded-lg object-cover" />
+              ) : (
+                <p className="pt-10 text-center text-xs font-medium text-[#4e6486]">Upload or capture a report image to begin scanning.</p>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleScanPrescription}
+              disabled={isScanningPrescription}
+              className="mt-3 w-full rounded-xl border border-[#25466e] bg-[linear-gradient(145deg,#21456e,#1a3557)] px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {isScanningPrescription ? "Scanning..." : "Scan And Check"}
+            </button>
+
+            {scanError ? <p className="mt-2 text-xs font-semibold text-[#8f2b2b]">{scanError}</p> : null}
+
+            {scanResult ? (
+              <div className="mt-3 rounded-xl border border-[#b9c9dd] bg-white/82 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#466086]">Report Status</p>
+                  <span className={`rounded-full border px-2 py-1 text-xs font-bold ${statusStyles(scanResult.status)}`}>
+                    {statusLabel(scanResult.status)}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm font-semibold text-[#1f3049]">{scanResult.summary}</p>
+                {scanResult.details ? <p className="mt-1 text-xs leading-relaxed text-[#355172]">{scanResult.details}</p> : null}
+                {scanResult.nextCheckIn ? (
+                  <p className="mt-2 text-xs font-semibold text-[#355172]">Next follow-up: {String(scanResult.nextCheckIn)}</p>
+                ) : null}
+
+                {followUpHistory.length ? (
+                  <div className="mt-2 rounded-lg border border-[#c5d3e5] bg-[#f3f7fd] px-2 py-2">
+                    <p className="text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-[#4e6486]">Follow-up Plan</p>
+                    <ul className="mt-1 space-y-1 text-xs text-[#2a4466]">
+                      {followUpHistory.map((item, index) => (
+                        <li key={`${item}-${index}`}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {scanResult.status !== "good" ? (
+                  <button
+                    type="button"
+                    onClick={handleFollowUp}
+                    disabled={isFetchingFollowUp}
+                    className="mt-3 w-full rounded-lg border border-[#728db0] bg-white px-2 py-2 text-xs font-semibold text-[#203652] disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {isFetchingFollowUp ? "Checking Follow-up..." : "Get Follow-up Until Normal"}
+                  </button>
+                ) : (
+                  <p className="mt-3 text-xs font-semibold text-[#0f6c46]">Your reports look normal. Continue maintenance checks.</p>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

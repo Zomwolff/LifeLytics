@@ -9,6 +9,7 @@ export default function Metrics({ user, goHome, goChat, goMetrics, goProfile, on
     : null;
   const bmiProgress = bmi ? Math.min(Math.max(bmi / 40, 0), 1) : 0;
   const bmiArcColor = !bmi ? "#7ebeff" : bmi < 18.5 ? "#7ebeff" : bmi <= 24.9 ? "#6de1a7" : bmi <= 29.9 ? "#f6c96f" : "#f08a8a";
+  const bmiCategory = !bmi ? "No data" : bmi < 18.5 ? "Underweight" : bmi <= 24.9 ? "Normal" : bmi <= 29.9 ? "Overweight" : "Obese";
 
   return (
     <div
@@ -140,10 +141,10 @@ export default function Metrics({ user, goHome, goChat, goMetrics, goProfile, on
         <main className="space-y-3">
           <section className="rounded-[1.5rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] p-4 text-white shadow-[0_12px_26px_rgba(17,29,46,0.28)]">
             <div className="mb-4 grid place-items-center">
-              <svg viewBox="0 0 120 62" className="h-16 w-full max-w-[176px]" fill="none" aria-hidden="true">
-                <path d="M12 50a48 48 0 0 1 96 0" stroke="rgba(158,207,255,0.35)" strokeWidth="7" strokeLinecap="round" />
+              <svg viewBox="0 0 120 70" className="h-16 w-full max-w-[176px]" fill="none" aria-hidden="true">
+                <path d="M12 56a48 48 0 0 1 96 0" stroke="rgba(158,207,255,0.35)" strokeWidth="7" strokeLinecap="round" />
                 <path
-                  d="M12 50a48 48 0 0 1 96 0"
+                  d="M12 56a48 48 0 0 1 96 0"
                   stroke={bmiArcColor}
                   strokeWidth="7"
                   strokeLinecap="round"
@@ -154,6 +155,9 @@ export default function Metrics({ user, goHome, goChat, goMetrics, goProfile, on
             </div>
             <p className="-mt-10 mb-4 text-center text-[2.8rem] font-bold tracking-[-0.02em]" style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}>
               {bmi ? bmi.toFixed(1) : "--"}
+            </p>
+            <p className="-mt-3 mb-4 text-center text-[0.75rem] font-semibold uppercase tracking-[0.12em] text-[#c3daf7]">
+              {bmiCategory}
             </p>
             <div className="grid grid-cols-3 gap-2 text-center">
               <div className="rounded-xl bg-white/10 px-2 py-2">

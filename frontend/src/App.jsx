@@ -4,8 +4,10 @@ import Startup from "./pages/Startup";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Home from "./pages/Home";
+import AiInsights from "./pages/AiInsights";
 import Chatbot from "./pages/Chatbot";
 import Metrics from "./pages/Metrics";
+import Trends from "./pages/Trends";
 import SetupMetrics from "./pages/SetupMetrics";
 import Profile from "./pages/Profile";
 import { getSessionUser, loginUser, logoutUser, registerUser, saveUserMetrics, subscribeToAuthChanges, updateUserProfileField } from "./auth";
@@ -105,7 +107,9 @@ export default function App() {
   if (page === "signup") return <Signup onContinue={handleSignup} goLogin={() => setPage("login")} />;
   if (page === "setup-metrics") return <SetupMetrics user={user} onContinue={handleSaveMetrics} />;
   if (page === "profile") return <Profile user={user} onSaveField={handleSaveProfileField} goBack={() => setPage("home")} />;
+  if (page === "ai-insights") return <AiInsights user={user} goBack={() => setPage("home")} />;
   if (page === "chat") return <Chatbot user={user} goBack={() => setPage(chatReturnPage)} />;
   if (page === "metrics") return <Metrics user={user} onLogout={handleLogout} goHome={() => setPage("home")} goProfile={() => setPage("profile")} goMetrics={() => setPage("metrics")} goChat={() => { setChatReturnPage("metrics"); setPage("chat"); }} />;
-  return <Home user={user} onLogout={handleLogout} goHome={() => setPage("home")} goProfile={() => setPage("profile")} goMetrics={() => setPage("metrics")} goChat={() => { setChatReturnPage("home"); setPage("chat"); }} />;
+  if (page === "trends") return <Trends user={user} goBack={() => setPage("home")} />;
+  return <Home user={user} onLogout={handleLogout} goHome={() => setPage("home")} goProfile={() => setPage("profile")} goMetrics={() => setPage("metrics")} goTrends={() => setPage("trends")} goAi={() => setPage("ai-insights")} goChat={() => { setChatReturnPage("home"); setPage("chat"); }} />;
 }
