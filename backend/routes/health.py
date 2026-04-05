@@ -15,7 +15,9 @@ Endpoints:
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from datetime import date, timedelta
+import logging
 import re
+from pydantic import BaseModel, Field
 
 from backend.models.schemas import (
     HeightRequest,
@@ -30,6 +32,91 @@ from backend.utils.firebase import getFirestoreClient
 from backend.services import healthService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+class UserProfileUpsert(BaseModel):
+    name: str | None = None
+    email: str | None = None
+    age: int | None = Field(default=None, ge=1, le=120)
+    gender: str | None = None
+    heightCm: float | None = Field(default=None, ge=80, le=260)
+    weightKg: float | None = Field(default=None, ge=20, le=400)
+    targetSteps: int | None = Field(default=None, ge=1000, le=50000)
+    caloriesTarget: int | None = Field(default=None, ge=1200, le=5000)
+
+
+def _generate_seed_logs() -> list[dict]:
+    today = now_ist().date()
+    week_start = today - timedelta(days=6)
+    seed_rows: list[dict] = []
+    for offset in range(7):
+        current_day = week_start + timedelta(days=offset)
+        trend = (offset - 3) / 8
+        seed_rows.append(
+            {
+                "date": current_day.isoformat(),
+                "sleep": round(7.2 + trend * 0.6, 1),
+                "steps": int(7800 + trend * 900),
+                "glucose": round(102 - trend * 4, 1),
+                "heartRate": int(74 + trend * 2),
+                "timestamp": f"{current_day.isoformat()}T08:00:00",
+            }
+        )
+    return seed_rows
+
+
+def _extract_numeric_from_nutrition(row: dict, keys: list[str]) -> float:
+    for key in keys:
+        value = _extract_number(row.get(key), 0.0)
+        if value > 0:
+            return value
+    return 0.0
+
+
+@router.post("/profile")
+async def upsertProfile(
+    payload: UserProfileUpsert,
+    userId: str = Depends(auth.getCurrentUserDependency),
+):
+    """Create or update the authenticated user profile in Firestore."""
+    try:
+        db = getFirestoreClient()
+        if not db:
+            raise HTTPException(status_code=500, detail="Database not available")
+
+        profile_updates = payload.model_dump(exclude_none=True)
+        if payload.heightCm is not None:
+            profile_updates["heightCm"] = round(payload.heightCm, 1)
+            profile_updates["height"] = round(payload.heightCm / 100.0, 4)
+        if payload.weightKg is not None:
+            profile_updates["weightKg"] = round(payload.weightKg, 1)
+            profile_updates["weight"] = round(payload.weightKg, 1)
+        profile_updates["updatedAt"] = now_ist().isoformat()
+
+        user_ref = db.collection("users").document(userId)
+        logger.info(f"Writing to Firestore: {userId}")
+
+        existing_doc = user_ref.get()
+        if not existing_doc.exists:
+            profile_updates["createdAt"] = now_ist().isoformat()
+            profile_updates["userId"] = userId
+            user_ref.set(profile_updates)
+            if not payload.heightCm or not payload.weightKg:
+                # Seed onboarding users so graphs work immediately.
+                batch = db.batch()
+                logs_ref = user_ref.collection("health_logs")
+                for row in _generate_seed_logs():
+                    batch.set(logs_ref.document(), row)
+                batch.commit()
+        else:
+            user_ref.set(profile_updates, merge=True)
+
+        return {"ok": True, "userId": userId}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def _extract_date_iso(row: dict) -> str | None:
@@ -55,6 +142,20 @@ def _extract_number(value, default: float = 0.0) -> float:
             except ValueError:
                 return default
     return default
+
+
+def _trend_label(values: list[float]) -> str:
+    if len(values) < 2:
+        return "stable"
+    first = values[0]
+    last = values[-1]
+    delta = last - first
+    threshold = max(abs(first), 1.0) * 0.05
+    if delta > threshold:
+        return "increasing"
+    if delta < -threshold:
+        return "decreasing"
+    return "stable"
 
 
 @router.post("/height", status_code=status.HTTP_201_CREATED)
@@ -133,6 +234,7 @@ async def postSmartwatch(
             "createdAt": now_ist().isoformat(),
         }
 
+        logger.info(f"Writing to Firestore: {userId}")
         db.collection("users").document(userId).collection("smartwatch").add(smartwatch_doc)
         return {"message": "Smartwatch data recorded"}
     except Exception as e:
@@ -151,6 +253,7 @@ async def getSmartwatch(
             raise HTTPException(status_code=500, detail="Database not available")
 
         collection_ref = db.collection("users").document(userId).collection("smartwatch")
+        logger.info(f"Reading from Firestore: {userId}")
         docs = collection_ref.stream()
 
         data = []
@@ -188,6 +291,7 @@ async def getSmartwatchSummary(
             .collection("smartwatch")
             .stream()
         )
+        logger.info(f"Reading from Firestore: {userId}")
 
         entries = []
         for doc in docs:
@@ -231,6 +335,7 @@ async def postGlucose(
             "createdAt": now_ist().isoformat(),
         }
 
+        logger.info(f"Writing to Firestore: {userId}")
         db.collection("users").document(userId).collection("glucose").add(glucose_doc)
         return {"message": "Glucose reading recorded"}
     except Exception as e:
@@ -245,6 +350,7 @@ async def getGlucose(userId: str = Depends(auth.getCurrentUserDependency)):
         if not db:
             raise HTTPException(status_code=500, detail="Database not available")
 
+        logger.info(f"Reading from Firestore: {userId}")
         docs = db.collection("users").document(userId).collection("glucose").stream()
         readings = []
         for doc in docs:
@@ -281,6 +387,7 @@ async def getWeeklyTrends(userId: str = Depends(auth.getCurrentUserDependency)):
         fats_by_day = {day.isoformat(): 0.0 for day in week_days}
         glucose_values_by_day = {day.isoformat(): [] for day in week_days}
 
+        logger.info(f"Reading from Firestore: {userId}")
         meals_docs = db.collection("users").document(userId).collection("meals").stream()
         for doc in meals_docs:
             row = doc.to_dict()
@@ -351,6 +458,113 @@ async def getWeeklyTrends(userId: str = Depends(auth.getCurrentUserDependency)):
             "weeklyCarbs": weekly_carbs,
             "weeklyFats": weekly_fats,
             "weeklyBloodGlucose": weekly_blood_glucose,
+            "sleep_trend": _trend_label(weekly_sleep),
+            "steps_trend": _trend_label([float(v) for v in weekly_steps]),
+            "glucose_trend": _trend_label(weekly_blood_glucose),
+            "averages": {
+                "sleep": round(sum(weekly_sleep) / len(weekly_sleep), 2),
+                "steps": round(sum(weekly_steps) / len(weekly_steps), 2),
+                "glucose": round(sum(weekly_blood_glucose) / len(weekly_blood_glucose), 2),
+            },
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/weekly")
+async def getWeeklyHealth(userId: str = Depends(auth.getCurrentUserDependency)):
+    """Return frontend-ready weekly graph arrays from health_logs."""
+    try:
+        db = getFirestoreClient()
+        if not db:
+            raise HTTPException(status_code=500, detail="Database not available")
+
+        today = now_ist().date()
+        week_start = today - timedelta(days=6)
+        ordered_days = [week_start + timedelta(days=offset) for offset in range(7)]
+        by_day = {
+            d.isoformat(): {
+                "sleep": 0.0,
+                "steps": 0.0,
+                "glucose": 0.0,
+                "heart_rate": 0.0,
+                "calories_intake": 0.0,
+                "calories_burned": 0.0,
+                "protein": 0.0,
+                "carbs": 0.0,
+                "fats": 0.0,
+            }
+            for d in ordered_days
+        }
+
+        logger.info(f"Reading from Firestore: {userId}")
+        meals_docs = db.collection("users").document(userId).collection("meals").stream()
+        for doc in meals_docs:
+            row = doc.to_dict()
+            day = _extract_date_iso(row)
+            if not day or day not in by_day:
+                continue
+            if date.fromisoformat(day) > today:
+                continue
+            by_day[day]["calories_intake"] += _extract_numeric_from_nutrition(row, ["calories"])
+            by_day[day]["protein"] += _extract_numeric_from_nutrition(row, ["protein"])
+            by_day[day]["carbs"] += _extract_numeric_from_nutrition(row, ["carbohydrates"])
+            by_day[day]["fats"] += _extract_numeric_from_nutrition(row, ["totalFat"])
+
+        smartwatch_docs = db.collection("users").document(userId).collection("smartwatch").stream()
+        for doc in smartwatch_docs:
+            row = doc.to_dict()
+            day = _extract_date_iso(row)
+            if not day or day not in by_day:
+                continue
+            if date.fromisoformat(day) > today:
+                continue
+
+            by_day[day]["steps"] = max(by_day[day]["steps"], _extract_number(row.get("steps"), 0.0))
+            by_day[day]["sleep"] = max(by_day[day]["sleep"], _extract_number(row.get("sleepDuration"), 0.0))
+            by_day[day]["calories_burned"] = max(
+                by_day[day]["calories_burned"], _extract_number(row.get("caloriesBurned"), 0.0)
+            )
+
+        docs = db.collection("users").document(userId).collection("health_logs").stream()
+        for doc in docs:
+            row = doc.to_dict()
+            day = _extract_date_iso(row)
+            if not day or day not in by_day:
+                continue
+
+            by_day[day]["sleep"] = float(_extract_number(row.get("sleep"), by_day[day]["sleep"]))
+            by_day[day]["steps"] = float(_extract_number(row.get("steps"), by_day[day]["steps"]))
+            by_day[day]["glucose"] = float(_extract_number(row.get("glucose"), by_day[day]["glucose"]))
+            by_day[day]["heart_rate"] = float(_extract_number(row.get("heartRate"), by_day[day]["heart_rate"]))
+
+        dates = [d.isoformat() for d in ordered_days]
+        sleep = [round(by_day[d]["sleep"], 1) for d in dates]
+        steps = [int(by_day[d]["steps"]) for d in dates]
+        glucose = [round(by_day[d]["glucose"], 1) for d in dates]
+        heart_rate = [int(by_day[d]["heart_rate"]) for d in dates]
+        calories_intake = [round(by_day[d]["calories_intake"], 1) for d in dates]
+        calories_burned = [round(by_day[d]["calories_burned"], 1) for d in dates]
+        protein = [round(by_day[d]["protein"], 1) for d in dates]
+        carbs = [round(by_day[d]["carbs"], 1) for d in dates]
+        fats = [round(by_day[d]["fats"], 1) for d in dates]
+
+        return {
+            "dates": dates,
+            "sleep": sleep,
+            "steps": steps,
+            "glucose": glucose,
+            "heart_rate": heart_rate,
+            "calories_intake": calories_intake,
+            "weeklySleep": sleep,
+            "weeklySteps": steps,
+            "weeklyBloodGlucose": glucose,
+            "weeklyCaloriesIntake": calories_intake,
+            "weeklyCaloriesBurned": calories_burned,
+            "weeklyProtein": protein,
+            "weeklyCarbs": carbs,
+            "weeklyFats": fats,
+            "weeklyHeartRate": heart_rate,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -360,17 +574,25 @@ async def getWeeklyTrends(userId: str = Depends(auth.getCurrentUserDependency)):
 async def getAllHealthData(userId: str = Depends(auth.getCurrentUserDependency)):
     """Get complete health profile for frontend."""
     try:
-        from backend import database
+        db = getFirestoreClient()
+        if not db:
+            raise HTTPException(status_code=500, detail="Database not available")
 
-        data = database.getAllUserData(userId)
+        logger.info(f"Reading from Firestore: {userId}")
+        profile_doc = db.collection("users").document(userId).get()
+        data = profile_doc.to_dict() if profile_doc.exists else {}
+
+        glucose_docs = db.collection("users").document(userId).collection("glucose").stream()
+        smartwatch_docs = db.collection("users").document(userId).collection("smartwatch").stream()
+        health_log_docs = db.collection("users").document(userId).collection("health_logs").stream()
         return {
             "userId": userId,
             "height": data.get("height"),
             "weight": data.get("weight"),
             "bmi": await healthService.calculateBmi(userId),
-            "glucose": database.getGlucoseReadings(userId),
-            "smartwatch": database.getSmartWatchData(userId),
-            "healthLogs": database.getHealthLogs(userId),
+            "glucose": [doc.to_dict() for doc in glucose_docs],
+            "smartwatch": [doc.to_dict() for doc in smartwatch_docs],
+            "healthLogs": [doc.to_dict() for doc in health_log_docs],
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

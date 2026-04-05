@@ -333,24 +333,24 @@ class LLMService:
 
         Structured to provide health context and force JSON response.
         """
-        metrics = data.get("metrics", {})
+        summary = data.get("llm_summary", {})
         return f"""Analyze this user health profile and provide professional health insights.
 
-USER HEALTH METRICS:
-- Height: {metrics.get('height', 'N/A')} m
-- Weight: {metrics.get('weight', 'N/A')} kg
-- BMI: {metrics.get('bmi', 'N/A')}
-- Average Sleep: {metrics.get('avgSleep', 'N/A')} hours/day
-- Average Steps: {metrics.get('avgSteps', 'N/A')} steps/day
-- Average Glucose: {metrics.get('avgGlucose', 'N/A')} mg/dL
-- Average Heart Rate: {metrics.get('avgHeartRate', 'N/A')} bpm
-- Data Points: {metrics.get('dataPoints', 'N/A')} days
+    SUMMARIZED HEALTH DATA:
+    - avg_sleep: {summary.get('avg_sleep', 'N/A')}
+    - avg_steps: {summary.get('avg_steps', 'N/A')}
+    - avg_glucose: {summary.get('avg_glucose', 'N/A')}
+    - avg_calories_intake: {summary.get('avg_calories_intake', 'N/A')}
+    - avg_calories_burned: {summary.get('avg_calories_burned', 'N/A')}
+    - avg_protein: {summary.get('avg_protein', 'N/A')}
+    - trend_summary: {summary.get('trend_summary', 'N/A')}
+    - data_points: {summary.get('data_points', 'N/A')}
 
 PROVIDED ANALYSIS:
 Insights: {data.get('insights', [])}
 Current Risks: {data.get('risks', [])}
 Recommendations: {data.get('recommendations', [])}
-Health Score: {data.get('health_score', 0)}
+    Health Score: {data.get('healthScore', 0)}
 
 TASK:
 1. Validate and enhance the provided insights
@@ -470,7 +470,7 @@ If discussing medical conditions, remind user to consult healthcare providers fo
             "insights": data.get("insights", []),
             "risks": data.get("risks", []),
             "recommendations": data.get("recommendations", []),
-            "healthScore": data.get("health_score", 50),
+            "healthScore": data.get("healthScore", 50),
             "metrics": data.get("metrics", {}),
             "llm_used": llmUsed,
             "model_used": modelUsed,

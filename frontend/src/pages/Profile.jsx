@@ -88,8 +88,8 @@ export default function Profile({ user, onSaveField, goBack }) {
     setDraftValue(value ?? "");
   }
 
-  function handleSave(field) {
-    const result = onSaveField({ field, value: draftValue });
+  async function handleSave(field) {
+    const result = await onSaveField({ field, value: draftValue });
     if (!result.ok) {
       setError(result.error || "Could not save field.");
       return;

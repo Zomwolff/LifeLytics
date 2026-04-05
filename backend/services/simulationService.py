@@ -6,8 +6,7 @@ Stores all data in Firestore for persistent storage.
 """
 import random
 import logging
-import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Any
 from backend.utils import firestore_db
 
@@ -66,12 +65,46 @@ async def generateTestUsers(n_users: int = 5) -> List[str]:
         # Save to Firestore
         success = await firestore_db.createUser(user_id, user_data)
         if success:
+            # Mandatory flow: immediately generate and persist 7 days of logs
+            seven_day_logs = _buildSevenDayHealthLogs(profile)
+            await firestore_db.batchAddHealthLogs(user_id, seven_day_logs)
             user_ids.append(user_id)
             logger.info(f"Created test user {user_id} with profile {profile}")
         else:
             logger.error(f"Failed to create test user {user_id}")
 
     return user_ids
+
+
+def _buildSevenDayHealthLogs(profile: HealthProfile) -> List[Dict[str, Any]]:
+    """Create 7 days of health logs with gentle trends and bounded randomness."""
+    base_date = datetime.now().date() - timedelta(days=6)
+    logs: List[Dict[str, Any]] = []
+
+    for offset in range(7):
+        current_date = base_date + timedelta(days=offset)
+        trend_factor = (offset - 3) / 12
+        noise = random.uniform(-1.0, 1.0)
+
+        sleep = max(4.5, min(9.0, profile.baseline_sleep + trend_factor + noise * 0.5))
+        steps = int(max(1200, profile.baseline_steps + trend_factor * 1400 + noise * 900))
+        glucose = max(70, min(240, profile.baseline_glucose - trend_factor * 8 + noise * 7))
+        heart_rate = int(
+            max(48, min(120, profile.baseline_heart_rate + trend_factor * 4 + noise * 3))
+        )
+
+        logs.append(
+            {
+                "date": current_date.isoformat(),
+                "sleep": round(sleep, 1),
+                "steps": int(steps),
+                "glucose": round(glucose, 1),
+                "heartRate": int(heart_rate),
+                "timestamp": f"{current_date.isoformat()}T08:00:00",
+            }
+        )
+
+    return logs
 
 
 async def simulateMonthData(user_id: str) -> None:
@@ -151,49 +184,6 @@ async def simulateMonthData(user_id: str) -> None:
     else:
         logger.error(f"Failed to simulate data for user {user_id}")
 
-
-
-async def saveInsightsToFile(user_id: str, insights: Dict[str, Any]) -> str:
-    """Save user insights to a text file.
-
-    Args:
-        user_id: The user ID
-        insights: Insights dictionary containing health analysis
-
-    Returns:
-        Path to the saved file
-    """
-    filename = f"insights_{user_id}.txt"
-
-    content = f"""LifeLytics Health Insights Report
-================================
-
-User ID: {user_id}
-Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-Health Score: {insights.get('health_score', 0)}/100
-
-Insights:
-"""
-
-    for insight in insights.get("insights", []):
-        content += f"  - {insight}\n"
-
-    content += "\nRisks:\n"
-    for risk in insights.get("risks", []):
-        content += f"  - {risk}\n"
-
-    content += "\nRecommendations:\n"
-    for rec in insights.get("recommendations", []):
-        content += f"  - {rec}\n"
-
-    with open(filename, "w") as f:
-        f.write(content)
-
-    logger.info(f"Saved insights to file {filename}")
-    return filename
-
-
 async def generateSimulationReport(user_ids: List[str]) -> Dict[str, Any]:
     """Generate a summary report of the simulation.
 
@@ -205,7 +195,7 @@ async def generateSimulationReport(user_ids: List[str]) -> Dict[str, Any]:
     """
     report = {
         "users_created": len(user_ids),
-        "files_generated": len(user_ids),
+        "health_logs_days_per_user": 7,
         "timestamp": datetime.now().isoformat(),
         "user_list": user_ids,
     }

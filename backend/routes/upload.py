@@ -11,8 +11,8 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 from backend.utils import auth
+from backend.utils import firestore_db
 from backend.services import reportParser
-from backend import database
 
 
 class FollowUpRequest(BaseModel):
@@ -35,9 +35,11 @@ async def uploadReport(
     """
     try:
         parsed = await reportParser.parseReport(file)
-        database.addReport(userId, parsed)
+        report_id = await firestore_db.saveReport(userId, parsed)
+        if not report_id:
+            raise HTTPException(status_code=500, detail="Failed to persist report")
         return {
-            "scanId": parsed.get("scanId"),
+            "scanId": parsed.get("scanId") or report_id,
             "filename": file.filename,
             "status": parsed.get("status", "normal"),
             "summary": parsed.get("summary", "Report analyzed successfully."),
@@ -53,7 +55,7 @@ async def uploadReport(
 async def getReports(userId: str = Depends(auth.getCurrentUserDependency)):
     """Get all uploaded reports."""
     try:
-        reports = database.getReports(userId)
+        reports = await firestore_db.getReports(userId)
         return {"reports": reports, "count": len(reports)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -157,12 +157,12 @@ export default function App() {
     return result;
   }
 
-  function handleSaveMetrics(payload) {
+  async function handleSaveMetrics(payload) {
     if (!user?.id) {
       return { ok: false, error: "Session not found. Please login again." };
     }
 
-    const result = saveUserMetrics({ userId: user.id, ...payload });
+    const result = await saveUserMetrics({ userId: user.id, ...payload });
     if (result.ok) {
       setUser(result.user);
       setPage("home");
@@ -170,12 +170,12 @@ export default function App() {
     return result;
   }
 
-  function handleSaveProfileField({ field, value }) {
+  async function handleSaveProfileField({ field, value }) {
     if (!user?.id) {
       return { ok: false, error: "Session not found. Please login again." };
     }
 
-    const result = updateUserProfileField({ userId: user.id, field, value });
+    const result = await updateUserProfileField({ userId: user.id, field, value });
     if (result.ok) {
       setUser(result.user);
     }

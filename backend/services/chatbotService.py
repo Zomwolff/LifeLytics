@@ -14,7 +14,7 @@ Features:
 from typing import Dict, Any
 import logging
 
-from backend import database
+from backend.utils import firestore_db
 from backend.services.llmService import getLLMService
 from backend.utils.logger import getLogger, timeOperation, llmLogger
 
@@ -43,7 +43,7 @@ async def respond(message: str, userId: str) -> Dict[str, Any]:
     with timeOperation(f"Chatbot response for user {userId}", logger) as timer:
         try:
             if _isGreetingMessage(message):
-                greeting = _buildGreetingResponse(userId)
+                greeting = await _buildGreetingResponse(userId)
                 return {
                     "response": greeting,
                     "llm_used": False,
@@ -51,10 +51,17 @@ async def respond(message: str, userId: str) -> Dict[str, Any]:
                     "llm_status": "greeting",
                 }
 
-            # Get user context for health awareness
-            userContext = database.getAllUserData(userId)
-            if not userContext:
-                userContext = {}
+            # Get user context for health awareness from Firestore
+            user_profile = await firestore_db.getUserProfile(userId) or {}
+            health_logs = await firestore_db.getHealthLogs(userId)
+            glucose = await firestore_db.getCollectionDocs(userId, "glucose")
+            smartwatch = await firestore_db.getCollectionDocs(userId, "smartwatch")
+            userContext = {
+                **user_profile,
+                "health_logs": health_logs,
+                "glucose": glucose,
+                "smartwatch": smartwatch,
+            }
 
             # Prepare health metrics
             healthMetrics = _extractHealthMetrics(userContext)
@@ -171,9 +178,9 @@ def _isGreetingMessage(message: str) -> bool:
     return any(re.match(pattern, normalized) for pattern in greeting_patterns)
 
 
-def _buildGreetingResponse(userId: str) -> str:
+async def _buildGreetingResponse(userId: str) -> str:
     """Build a simple greeting response."""
-    session = database.getAllUserData(userId) or {}
+    session = await firestore_db.getUserProfile(userId) or {}
     name = session.get("name")
     if name:
         return f"Hi {name}, how can I help you today?"

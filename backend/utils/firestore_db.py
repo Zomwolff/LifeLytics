@@ -1,6 +1,7 @@
 """Firestore database operations for LifeLytics.
 
-Provides async wrappers around Firestore operations for users, health logs, insights, and reports.
+Provides async wrappers around Firestore operations for users, health logs,
+insights, reports, and related collections.
 """
 
 import logging
@@ -9,6 +10,22 @@ from typing import Dict, List, Any, Optional
 from backend.utils.firebase import getFirestoreClient
 
 logger = logging.getLogger(__name__)
+
+
+def _users_ref(db):
+    return db.collection("users")
+
+
+def _user_ref(db, userId: str):
+    return _users_ref(db).document(userId)
+
+
+def _log_write(userId: str) -> None:
+    logger.info(f"Writing to Firestore: {userId}")
+
+
+def _log_read(userId: str) -> None:
+    logger.info(f"Reading from Firestore: {userId}")
 
 
 async def createUser(userId: str, userData: Dict[str, Any]) -> bool:
@@ -27,7 +44,8 @@ async def createUser(userId: str, userData: Dict[str, Any]) -> bool:
             logger.error("Firestore client not available")
             return False
 
-        db.collection("users").document(userId).set(userData)
+        _log_write(userId)
+        _user_ref(db, userId).set(userData)
         logger.info(f"Created user {userId} in Firestore")
         return True
 
@@ -51,7 +69,8 @@ async def getUserProfile(userId: str) -> Optional[Dict[str, Any]]:
             logger.error("Firestore client not available")
             return None
 
-        doc = db.collection("users").document(userId).get()
+        _log_read(userId)
+        doc = _user_ref(db, userId).get()
         if doc.exists:
             return doc.to_dict()
         return None
@@ -73,7 +92,7 @@ async def getAllUsers() -> List[Dict[str, Any]]:
             logger.error("Firestore client not available")
             return []
 
-        docs = db.collection("users").stream()
+        docs = _users_ref(db).stream()
         users = []
         for doc in docs:
             user_data = doc.to_dict()
@@ -108,9 +127,8 @@ async def addHealthLog(userId: str, logData: Dict[str, Any]) -> bool:
             "timestamp": datetime.now().isoformat()
         }
 
-        db.collection("users").document(userId).collection("health_logs").add(
-            log_data_with_timestamp
-        )
+        _log_write(userId)
+        _user_ref(db, userId).collection("health_logs").add(log_data_with_timestamp)
         logger.info(f"Added health log for user {userId}")
         return True
 
@@ -134,18 +152,15 @@ async def getHealthLogs(userId: str) -> List[Dict[str, Any]]:
             logger.error("Firestore client not available")
             return []
 
-        docs = (
-            db.collection("users")
-            .document(userId)
-            .collection("health_logs")
-            .order_by("day")
-            .stream()
-        )
+        _log_read(userId)
+        docs = _user_ref(db, userId).collection("health_logs").stream()
         logs = []
         for doc in docs:
             log_data = doc.to_dict()
             log_data["id"] = doc.id
             logs.append(log_data)
+
+        logs.sort(key=lambda item: item.get("timestamp", ""), reverse=True)
 
         return logs
 
@@ -175,15 +190,64 @@ async def saveInsight(userId: str, insightData: Dict[str, Any]) -> bool:
             "timestamp": datetime.now().isoformat()
         }
 
-        db.collection("users").document(userId).collection("insights").add(
-            insight_data_with_timestamp
-        )
+        _log_write(userId)
+        _user_ref(db, userId).collection("insights").add(insight_data_with_timestamp)
         logger.info(f"Saved insight for user {userId}")
         return True
 
     except Exception as e:
         logger.error(f"Error saving insight for {userId}: {str(e)}")
         return False
+
+
+async def saveTrendContext(userId: str, contextData: Dict[str, Any]) -> bool:
+    """Store the latest trends-page weekly payload for later insight generation."""
+    try:
+        db = getFirestoreClient()
+        if not db:
+            logger.error("Firestore client not available")
+            return False
+
+        payload = {
+            **contextData,
+            "type": "trend_context",
+            "source": "trends_page",
+            "timestamp": datetime.now().isoformat(),
+        }
+
+        _log_write(userId)
+        _user_ref(db, userId).collection("insights").add(payload)
+        return True
+    except Exception as e:
+        logger.error(f"Error saving trend context for {userId}: {str(e)}")
+        return False
+
+
+async def getLatestTrendContext(userId: str) -> Optional[Dict[str, Any]]:
+    """Get the newest trends-page payload stored in insights."""
+    try:
+        db = getFirestoreClient()
+        if not db:
+            logger.error("Firestore client not available")
+            return None
+
+        _log_read(userId)
+        docs = _user_ref(db, userId).collection("insights").stream()
+        trend_docs: List[Dict[str, Any]] = []
+        for doc in docs:
+            row = doc.to_dict()
+            if row.get("type") == "trend_context":
+                row["id"] = doc.id
+                trend_docs.append(row)
+
+        if not trend_docs:
+            return None
+
+        trend_docs.sort(key=lambda item: item.get("timestamp", ""), reverse=True)
+        return trend_docs[0]
+    except Exception as e:
+        logger.error(f"Error getting trend context for {userId}: {str(e)}")
+        return None
 
 
 async def getInsights(userId: str) -> List[Dict[str, Any]]:
@@ -201,18 +265,15 @@ async def getInsights(userId: str) -> List[Dict[str, Any]]:
             logger.error("Firestore client not available")
             return []
 
-        docs = (
-            db.collection("users")
-            .document(userId)
-            .collection("insights")
-            .order_by("timestamp", direction="DESCENDING")
-            .stream()
-        )
+        _log_read(userId)
+        docs = _user_ref(db, userId).collection("insights").stream()
         insights = []
         for doc in docs:
             insight_data = doc.to_dict()
             insight_data["id"] = doc.id
             insights.append(insight_data)
+
+        insights.sort(key=lambda item: item.get("timestamp", ""), reverse=True)
 
         return insights
 
@@ -240,7 +301,8 @@ async def batchAddHealthLogs(
             return False
 
         batch = db.batch()
-        logs_ref = db.collection("users").document(userId).collection("health_logs")
+        _log_write(userId)
+        logs_ref = _user_ref(db, userId).collection("health_logs")
 
         for log_data in logsData:
             log_with_timestamp = {
@@ -274,40 +336,126 @@ async def deleteUserData(userId: str) -> bool:
             return False
 
         # Delete health logs
-        logs = (
-            db.collection("users")
-            .document(userId)
-            .collection("health_logs")
-            .stream()
-        )
+        logs = _user_ref(db, userId).collection("health_logs").stream()
         for log in logs:
             log.reference.delete()
 
         # Delete insights
-        insights = (
-            db.collection("users")
-            .document(userId)
-            .collection("insights")
-            .stream()
-        )
+        insights = _user_ref(db, userId).collection("insights").stream()
         for insight in insights:
             insight.reference.delete()
 
         # Delete reports
-        reports = (
-            db.collection("users")
-            .document(userId)
-            .collection("reports")
-            .stream()
-        )
+        reports = _user_ref(db, userId).collection("reports").stream()
         for report in reports:
             report.reference.delete()
 
         # Delete user document
-        db.collection("users").document(userId).delete()
+        _user_ref(db, userId).delete()
         logger.info(f"Deleted all data for user {userId}")
         return True
 
     except Exception as e:
         logger.error(f"Error deleting user data for {userId}: {str(e)}")
+        return False
+
+
+async def updateUserProfile(userId: str, updates: Dict[str, Any]) -> bool:
+    """Update fields on the user document."""
+    try:
+        db = getFirestoreClient()
+        if not db:
+            logger.error("Firestore client not available")
+            return False
+
+        _log_write(userId)
+        _user_ref(db, userId).set(updates, merge=True)
+        return True
+    except Exception as e:
+        logger.error(f"Error updating user profile {userId}: {str(e)}")
+        return False
+
+
+async def saveReport(userId: str, reportData: Dict[str, Any]) -> Optional[str]:
+    """Save parsed report into users/{user_id}/reports."""
+    try:
+        db = getFirestoreClient()
+        if not db:
+            logger.error("Firestore client not available")
+            return None
+
+        payload = {
+            **reportData,
+            "timestamp": datetime.now().isoformat(),
+        }
+        _log_write(userId)
+        _, ref = _user_ref(db, userId).collection("reports").add(payload)
+        return ref.id
+    except Exception as e:
+        logger.error(f"Error saving report for {userId}: {str(e)}")
+        return None
+
+
+async def getReports(userId: str) -> List[Dict[str, Any]]:
+    """Get reports from users/{user_id}/reports."""
+    try:
+        db = getFirestoreClient()
+        if not db:
+            logger.error("Firestore client not available")
+            return []
+
+        _log_read(userId)
+        docs = _user_ref(db, userId).collection("reports").stream()
+        reports: List[Dict[str, Any]] = []
+        for doc in docs:
+            row = doc.to_dict()
+            row["id"] = doc.id
+            reports.append(row)
+        reports.sort(key=lambda item: item.get("timestamp", ""), reverse=True)
+        return reports
+    except Exception as e:
+        logger.error(f"Error getting reports for {userId}: {str(e)}")
+        return []
+
+
+async def getCollectionDocs(userId: str, collectionName: str) -> List[Dict[str, Any]]:
+    """Fetch all docs from users/{user_id}/{collectionName}."""
+    try:
+        db = getFirestoreClient()
+        if not db:
+            logger.error("Firestore client not available")
+            return []
+
+        _log_read(userId)
+        docs = _user_ref(db, userId).collection(collectionName).stream()
+        rows: List[Dict[str, Any]] = []
+        for doc in docs:
+            row = doc.to_dict()
+            row["id"] = doc.id
+            rows.append(row)
+        return rows
+    except Exception as e:
+        logger.error(
+            f"Error fetching collection {collectionName} for {userId}: {str(e)}"
+        )
+        return []
+
+
+async def addCollectionDoc(
+    userId: str, collectionName: str, payload: Dict[str, Any]
+) -> bool:
+    """Add document to users/{user_id}/{collectionName}."""
+    try:
+        db = getFirestoreClient()
+        if not db:
+            logger.error("Firestore client not available")
+            return False
+
+        _log_write(userId)
+        _user_ref(db, userId).collection(collectionName).add(payload)
+        return True
+    except Exception as e:
+        logger.error(
+            f"Error adding document to collection {collectionName} for {userId}: {str(e)}"
+        )
         return False

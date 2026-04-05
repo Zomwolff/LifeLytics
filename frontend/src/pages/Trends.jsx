@@ -2,31 +2,34 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { apiFetch } from "../api/client";
 
-function WeeklyBarChart({ title, unit, values, maxValue, colorClass, target }) {
-  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+function WeeklyBarChart({ title, unit, values, labels, maxValue, colorClass, target, weeklyAverage }) {
+  const fallbackLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const resolvedLabels = Array.isArray(labels) && labels.length === 7 ? labels : fallbackLabels;
 
   return (
     <section className="rounded-[1.25rem] border border-white/30 bg-[rgba(255,255,255,0.62)] p-4 shadow-[0_10px_22px_rgba(31,43,64,0.14)]">
       <div className="mb-3 flex items-end justify-between gap-2">
         <p className="text-sm font-semibold text-[#2b4467]">{title}</p>
         <div className="flex items-center gap-2">
+          <p className="text-[0.68rem] font-semibold text-[#4e6486]">Avg: {weeklyAverage}</p>
           {target !== undefined && <p className="text-[0.68rem] font-semibold text-[#4e6486]">Target: {target}</p>}
           <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[#4e6486]">Weekly</p>
         </div>
       </div>
 
-      <div className="grid h-40 grid-cols-7 items-end gap-2 rounded-xl border border-[#c8d5e6] bg-[linear-gradient(180deg,rgba(238,244,252,0.85),rgba(225,235,248,0.88))] px-2 py-3">
+      <div className="grid h-40 grid-cols-7 items-end gap-1 rounded-xl border border-[#c8d5e6] bg-[linear-gradient(180deg,rgba(238,244,252,0.85),rgba(225,235,248,0.88))] px-2 py-3">
         {values.map((value, index) => {
           const ratio = maxValue > 0 ? Math.min(Math.max(value / maxValue, 0), 1) : 0;
           const barHeight = `${Math.max(ratio * 100, 8)}%`;
 
           return (
-            <div key={`${title}-${days[index]}`} className="flex h-full flex-col items-center justify-end gap-1">
-              <div className="text-[0.62rem] font-semibold text-[#48607e]">{value}</div>
+            <div key={`${title}-${resolvedLabels[index]}`} className="flex h-full min-w-0 flex-col items-center justify-end gap-1">
               <div className="flex h-28 w-full items-end rounded-md bg-white/55 p-[2px]">
                 <div className={`w-full rounded-sm ${colorClass}`} style={{ height: barHeight }} />
               </div>
-              <div className="text-[0.62rem] font-semibold uppercase tracking-[0.08em] text-[#4e6486]">{days[index]}</div>
+              <div className="w-full truncate text-center text-[0.62rem] font-semibold leading-none text-[#4e6486]">
+                {resolvedLabels[index]}
+              </div>
             </div>
           );
         })}
@@ -43,25 +46,41 @@ function normalizeSeries(series, fallback) {
   return parsed.every((value) => Number.isFinite(value)) ? parsed : fallback;
 }
 
+function formatDateLabel(dateString) {
+  if (typeof dateString !== "string" || !dateString) return "";
+
+  const parsedDate = new Date(`${dateString}T00:00:00`);
+  if (Number.isNaN(parsedDate.getTime())) return dateString;
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+  }).format(parsedDate);
+}
+
 export default function Trends({ user, goBack }) {
   const fallbackSleep = [0, 0, 0, 0, 0, 0, 0];
   const fallbackSteps = [0, 0, 0, 0, 0, 0, 0];
   const fallbackCaloriesIntake = [0, 0, 0, 0, 0, 0, 0];
+  const fallbackCaloriesBurned = [0, 0, 0, 0, 0, 0, 0];
   const fallbackBloodGlucose = [0, 0, 0, 0, 0, 0, 0];
 
   const [weeklySleep, setWeeklySleep] = useState(fallbackSleep);
   const [weeklySteps, setWeeklySteps] = useState(fallbackSteps);
   const [weeklyCaloriesIntake, setWeeklyCaloriesIntake] = useState(fallbackCaloriesIntake);
+  const [weeklyCaloriesBurned, setWeeklyCaloriesBurned] = useState(fallbackCaloriesBurned);
   const [weeklyBloodGlucose, setWeeklyBloodGlucose] = useState(fallbackBloodGlucose);
+  const [weeklyDates, setWeeklyDates] = useState([]);
   const [isLoadingTrends, setIsLoadingTrends] = useState(false);
   const [trendsError, setTrendsError] = useState("");
 
-  // Calculate averages
   const avgSleep = (weeklySleep.reduce((a, b) => a + b, 0) / weeklySleep.length).toFixed(1);
   const totalSteps = weeklySteps.reduce((a, b) => a + b, 0);
+  const avgSteps = (totalSteps / weeklySteps.length).toFixed(0);
   const avgCalories = (weeklyCaloriesIntake.reduce((a, b) => a + b, 0) / weeklyCaloriesIntake.length).toFixed(0);
+  const avgCaloriesBurned = (weeklyCaloriesBurned.reduce((a, b) => a + b, 0) / weeklyCaloriesBurned.length).toFixed(0);
   const avgGlucose = (weeklyBloodGlucose.reduce((a, b) => a + b, 0) / weeklyBloodGlucose.length).toFixed(0);
-
+  const weeklyLabels = weeklyDates.map(formatDateLabel);
 
   useEffect(() => {
     async function fetchWeeklyTrends() {
@@ -69,11 +88,40 @@ export default function Trends({ user, goBack }) {
       setTrendsError("");
 
       try {
-        const data = await apiFetch("/health/trends", { method: "GET" });
-        setWeeklySleep(normalizeSeries(data.weeklySleep, fallbackSleep));
-        setWeeklySteps(normalizeSeries(data.weeklySteps, fallbackSteps));
-        setWeeklyCaloriesIntake(normalizeSeries(data.weeklyCaloriesIntake, fallbackCaloriesIntake));
-        setWeeklyBloodGlucose(normalizeSeries(data.weeklyBloodGlucose, fallbackBloodGlucose));
+        const data = await apiFetch("/health/weekly", { method: "GET" });
+        const dates = Array.isArray(data.dates) ? data.dates : [];
+        const sleep = normalizeSeries(data.sleep || data.weeklySleep, fallbackSleep);
+        const steps = normalizeSeries(data.steps || data.weeklySteps, fallbackSteps);
+        const caloriesIntake = normalizeSeries(data.calories_intake || data.weeklyCaloriesIntake, fallbackCaloriesIntake);
+        const caloriesBurned = normalizeSeries(data.weeklyCaloriesBurned, fallbackCaloriesBurned);
+        const glucose = normalizeSeries(data.glucose || data.weeklyBloodGlucose, fallbackBloodGlucose);
+
+        setWeeklyDates(dates);
+        setWeeklySleep(sleep);
+        setWeeklySteps(steps);
+        setWeeklyCaloriesIntake(caloriesIntake);
+        setWeeklyCaloriesBurned(caloriesBurned);
+        setWeeklyBloodGlucose(glucose);
+
+        try {
+          await apiFetch("/insights/trends-context", {
+            method: "POST",
+            body: JSON.stringify({
+              dates,
+              sleep,
+              steps,
+              glucose,
+              heart_rate: Array.isArray(data.heart_rate) ? data.heart_rate : Array.isArray(data.weeklyHeartRate) ? data.weeklyHeartRate : [],
+              calories_intake: caloriesIntake,
+              weeklyCaloriesBurned: caloriesBurned,
+              weeklyProtein: Array.isArray(data.weeklyProtein) ? data.weeklyProtein : [],
+              weeklyCarbs: Array.isArray(data.weeklyCarbs) ? data.weeklyCarbs : [],
+              weeklyFats: Array.isArray(data.weeklyFats) ? data.weeklyFats : [],
+            }),
+          });
+        } catch {
+          // If context save fails, charts still render from fetched weekly data.
+        }
       } catch {
         setTrendsError("Backend trends unavailable right now. Showing database default values.");
       } finally {
@@ -115,7 +163,7 @@ export default function Trends({ user, goBack }) {
             className="mt-1 text-[1.5rem] font-semibold leading-[1.08] text-[#131722]"
             style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}
           >
-            Week Summary: {avgSleep}h sleep • {totalSteps.toLocaleString()} steps • {avgCalories} kcal
+            Week Summary: {avgSleep}h sleep • {avgSteps.toLocaleString()} steps/day • {avgCalories} kcal/day
           </p>
         </div>
 
@@ -127,33 +175,51 @@ export default function Trends({ user, goBack }) {
             title="Sleep"
             unit="hours"
             values={weeklySleep}
+            labels={weeklyLabels}
             maxValue={10}
             colorClass="bg-[linear-gradient(180deg,#6c8dff,#4f6de3)]"
+            weeklyAverage={avgSleep}
           />
 
           <WeeklyBarChart
             title="Steps"
             unit="steps"
             values={weeklySteps}
+            labels={weeklyLabels}
             maxValue={12000}
             colorClass="bg-[linear-gradient(180deg,#53dcb2,#2db791)]"
+            weeklyAverage={avgSteps.toLocaleString()}
           />
 
           <WeeklyBarChart
             title="Calorie Intake"
             unit="kcal"
             values={weeklyCaloriesIntake}
+            labels={weeklyLabels}
             maxValue={Math.max(Number.isFinite(user?.caloriesTarget) ? user.caloriesTarget * 1.2 : 2400, 2400)}
             colorClass="bg-[linear-gradient(180deg,#ffb17f,#f1884e)]"
             target={user?.caloriesTarget || 2000}
+            weeklyAverage={avgCalories}
+          />
+
+          <WeeklyBarChart
+            title="Calories Burned"
+            unit="kcal"
+            values={weeklyCaloriesBurned}
+            labels={weeklyLabels}
+            maxValue={Math.max(...weeklyCaloriesBurned, 1)}
+            colorClass="bg-[linear-gradient(180deg,#76d6ff,#3da3e6)]"
+            weeklyAverage={avgCaloriesBurned}
           />
 
           <WeeklyBarChart
             title="Blood Glucose Levels"
             unit="mg/dL"
             values={weeklyBloodGlucose}
+            labels={weeklyLabels}
             maxValue={180}
             colorClass="bg-[linear-gradient(180deg,#f48aa0,#d75a78)]"
+            weeklyAverage={avgGlucose}
           />
         </main>
       </motion.div>

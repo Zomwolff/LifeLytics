@@ -16,13 +16,12 @@ router = APIRouter()
 
 @router.post("/generate-data")
 async def generateData() -> Dict[str, Any]:
-    """Generate test users, simulate 30 days of data, and create insights.
+    """Generate test users, persist 7 days of data, and create insights.
 
     Flow:
     1. Create 7 test users with diverse profiles in Firestore
-    2. Simulate 30 days of realistic health data for each user
-    3. Generate insights using rule-based logic and LLM
-    4. Save insights to Firestore and .txt files
+    2. Immediately persist 7 days of realistic health data in health_logs
+    3. Generate insights and store them in Firestore
 
     Returns:
         Summary of generated data (users created, files generated)
@@ -32,26 +31,19 @@ async def generateData() -> Dict[str, Any]:
         n_users = 7
         user_ids = await simulationService.generateTestUsers(n_users)
 
-        files_generated = 0
+        insights_generated = 0
 
-        # Simulate 30 days of data for each user
+        # Users already receive 7 days of logs during creation.
         for user_id in user_ids:
-            # Simulate health data and store in Firestore
-            await simulationService.simulateMonthData(user_id)
-
             # Generate insights for each user
             try:
-                insights = await insightService.generateInsights(user_id)
-                # Save insights to Firestore
-                await firestore_db.saveInsight(user_id, insights)
-                # Also save to text file
-                await simulationService.saveInsightsToFile(user_id, insights)
-                files_generated += 1
+                await insightService.generateInsights(user_id)
+                insights_generated += 1
             except Exception as e:
                 logger.error(f"Error generating insights for {user_id}: {str(e)}")
 
         report = await simulationService.generateSimulationReport(user_ids)
-        report["files_generated"] = files_generated
+        report["insights_generated"] = insights_generated
         return report
 
     except Exception as e:

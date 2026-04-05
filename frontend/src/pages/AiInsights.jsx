@@ -49,24 +49,67 @@ function sumSeries(left, right) {
   return result.every((value) => Number.isFinite(value)) ? result : null;
 }
 
-function findMaxIndex(values) {
-  let bestIndex = 0;
-  for (let index = 1; index < values.length; index += 1) {
-    if (values[index] > values[bestIndex]) {
-      bestIndex = index;
-    }
-  }
-  return bestIndex;
+function getNumericSeries(values) {
+  if (!Array.isArray(values)) return [];
+  return values.map((value) => Number(value) || 0);
 }
 
-function findMinIndex(values) {
-  let bestIndex = 0;
-  for (let index = 1; index < values.length; index += 1) {
-    if (values[index] < values[bestIndex]) {
-      bestIndex = index;
+function getRandomIndexFromSeries(values, mode = "high") {
+  const numericValues = getNumericSeries(values);
+  if (numericValues.length === 0) return 0;
+
+  const positiveEntries = numericValues
+    .map((value, index) => ({ value, index }))
+    .filter(({ value }) => value > 0);
+
+  if (positiveEntries.length === 0) {
+    return Math.floor(Math.random() * numericValues.length);
+  }
+
+  const rankedEntries = positiveEntries
+    .sort((left, right) => (mode === "low" ? left.value - right.value : right.value - left.value))
+    .slice(0, Math.min(3, positiveEntries.length));
+
+  const weights = rankedEntries.map(({ value }) => (mode === "low" ? 1 / (value + 1) : value));
+  const totalWeight = weights.reduce((sum, value) => sum + value, 0);
+  let cursor = Math.random() * totalWeight;
+
+  for (let position = 0; position < rankedEntries.length; position += 1) {
+    cursor -= weights[position];
+    if (cursor <= 0) {
+      return rankedEntries[position].index;
     }
   }
-  return bestIndex;
+
+  return rankedEntries[0].index;
+}
+
+function getSeriesScore(values) {
+  return getNumericSeries(values).reduce((sum, value) => sum + Math.max(value, 0), 0);
+}
+
+function getFeaturedCardIndex(cards) {
+  if (!Array.isArray(cards) || cards.length === 0) return 0;
+
+  const weightedCards = cards
+    .map((card, index) => ({ index, score: card.score || 0 }))
+    .filter(({ score }) => score > 0);
+
+  if (weightedCards.length === 0) {
+    return Math.floor(Math.random() * cards.length);
+  }
+
+  const totalWeight = weightedCards.reduce((sum, item) => sum + item.score, 0);
+  let cursor = Math.random() * totalWeight;
+
+  for (const item of weightedCards) {
+    cursor -= item.score;
+    if (cursor <= 0) {
+      return item.index;
+    }
+  }
+
+  return weightedCards[0].index;
 }
 
 function average(values) {
@@ -224,7 +267,6 @@ export default function AiInsights({ user, goBack }) {
   const [insightsError, setInsightsError] = useState("");
   const [isLoadingTrends, setIsLoadingTrends] = useState(false);
   const [trendsError, setTrendsError] = useState("");
-  const [activeActivityCard, setActiveActivityCard] = useState(0);
   const [weeklySleep, setWeeklySleep] = useState([0, 0, 0, 0, 0, 0, 0]);
   const [weeklySteps, setWeeklySteps] = useState([0, 0, 0, 0, 0, 0, 0]);
   const [weeklyCaloriesBurnt, setWeeklyCaloriesBurnt] = useState([0, 0, 0, 0, 0, 0, 0]);
@@ -262,75 +304,84 @@ export default function AiInsights({ user, goBack }) {
 
   const aiInsightsEndpoint = import.meta.env.VITE_AI_INSIGHTS_ENDPOINT || "/api/ai-insights";
   const activityCards = useMemo(() => {
-    const bestProteinIndex = findMaxIndex(weeklyProtein);
-    const bestIntakeIndex = findMaxIndex(weeklyCaloriesIntake);
-    const bestBurnIndex = findMaxIndex(weeklyCaloriesBurnt);
-    const bestStepsIndex = findMaxIndex(weeklySteps);
-    const bestGlucoseIndex = findMinIndex(weeklyBloodGlucose);
-    const lowestCarbsIndex = findMinIndex(weeklyCarbs);
-    const lowestFatsIndex = findMinIndex(weeklyFats);
+    const proteinIndex = getRandomIndexFromSeries(weeklyProtein, "high");
+    const intakeIndex = getRandomIndexFromSeries(weeklyCaloriesIntake, "high");
+    const burnIndex = getRandomIndexFromSeries(weeklyCaloriesBurnt, "high");
+    const stepsIndex = getRandomIndexFromSeries(weeklySteps, "high");
+    const glucoseIndex = getRandomIndexFromSeries(weeklyBloodGlucose, "low");
+    const carbsIndex = getRandomIndexFromSeries(weeklyCarbs, "low");
+    const fatsIndex = getRandomIndexFromSeries(weeklyFats, "low");
+    const intakeScore = getSeriesScore(weeklyCaloriesIntake);
 
     return [
       {
         id: "protein",
         eyebrow: "Protein Highlight",
-        title: `Highest protein intake was on ${DAYS[bestProteinIndex]}`,
-        value: `${Math.round(weeklyProtein[bestProteinIndex])} g`,
-        note: "This was your best protein day this week.",
+        title: `One of your stronger protein days was ${DAYS[proteinIndex]}`,
+        value: `${Math.round(weeklyProtein[proteinIndex] || 0)} g`,
+        note: "Pulled from your weekly Firestore logs.",
         chip: "bg-[linear-gradient(160deg,#4ea9ff,#3b7ed6)]",
+        score: getSeriesScore(weeklyProtein),
       },
       {
         id: "calories-intake",
         eyebrow: "Intake Highlight",
-        title: `Highest caloric intake was on ${DAYS[bestIntakeIndex]}`,
-        value: `${Math.round(weeklyCaloriesIntake[bestIntakeIndex])} kcal`,
-        note: "Total consumed calories from logged meals.",
+        title: intakeScore > 0 ? `A notable intake day was ${DAYS[intakeIndex]}` : "No meal logs were found yet",
+        value: intakeScore > 0 ? `${Math.round(weeklyCaloriesIntake[intakeIndex] || 0)} kcal` : "--",
+        note: intakeScore > 0 ? "Randomized from your real meal log data." : "Add meal entries to unlock a Firestore-backed highlight.",
         chip: "bg-[linear-gradient(160deg,#f3a06f,#dc7b44)]",
+        score: intakeScore,
       },
       {
         id: "calories-burn",
         eyebrow: "Burn Highlight",
-        title: `Highest caloric burn was on ${DAYS[bestBurnIndex]}`,
-        value: `${Math.round(weeklyCaloriesBurnt[bestBurnIndex])} kcal`,
-        note: "Total burned calories from smartwatch data.",
+        title: `A strong burn day landed on ${DAYS[burnIndex]}`,
+        value: `${Math.round(weeklyCaloriesBurnt[burnIndex] || 0)} kcal`,
+        note: "Based on the activity data saved in Firestore.",
         chip: "bg-[linear-gradient(160deg,#ff9f65,#d46c30)]",
+        score: getSeriesScore(weeklyCaloriesBurnt),
       },
       {
         id: "steps",
         eyebrow: "Movement Highlight",
-        title: `You walked the max steps on ${DAYS[bestStepsIndex]}`,
-        value: `${Math.round(weeklySteps[bestStepsIndex])} steps`,
-        note: "Strong activity day. Repeat the same routine this week.",
+        title: `One of your more active days was ${DAYS[stepsIndex]}`,
+        value: `${Math.round(weeklySteps[stepsIndex] || 0)} steps`,
+        note: "Randomly selected from your weekly movement data.",
         chip: "bg-[linear-gradient(160deg,#49cfa7,#2f9f86)]",
+        score: getSeriesScore(weeklySteps),
       },
       {
         id: "glucose",
         eyebrow: "Glucose Highlight",
-        title: `Your best glucose level was on ${DAYS[bestGlucoseIndex]}`,
-        value: `${Math.round(weeklyBloodGlucose[bestGlucoseIndex])} mg/dL`,
-        note: "Most stable reading this week. Keep meals and timing consistent.",
+        title: `One of your steadier glucose days was ${DAYS[glucoseIndex]}`,
+        value: `${Math.round(weeklyBloodGlucose[glucoseIndex] || 0)} mg/dL`,
+        note: "Pulled from the same Firestore context as Trends.",
         chip: "bg-[linear-gradient(160deg,#ef8ea8,#cb607a)]",
+        score: Math.max(1, 1000 - getSeriesScore(weeklyBloodGlucose)),
       },
       {
         id: "low-carbs",
         eyebrow: "Low Carbs Day",
-        title: `Lowest carbs were on ${DAYS[lowestCarbsIndex]}`,
-        value: `${Math.round(weeklyCarbs[lowestCarbsIndex])} g`,
-        note: "This day had the minimum carbohydrate intake.",
+        title: `One of your lighter carb days was ${DAYS[carbsIndex]}`,
+        value: `${Math.round(weeklyCarbs[carbsIndex] || 0)} g`,
+        note: "Randomized from your nutrition history.",
         chip: "bg-[linear-gradient(160deg,#8fb4ff,#5f84d8)]",
+        score: Math.max(1, 100 - getSeriesScore(weeklyCarbs)),
       },
       {
         id: "low-fats",
         eyebrow: "Low Fats Day",
-        title: `Lowest fats were on ${DAYS[lowestFatsIndex]}`,
-        value: `${Math.round(weeklyFats[lowestFatsIndex])} g`,
-        note: "This day had the minimum fat intake.",
+        title: `One of your lighter fat days was ${DAYS[fatsIndex]}`,
+        value: `${Math.round(weeklyFats[fatsIndex] || 0)} g`,
+        note: "Picked from the same weekly database snapshot.",
         chip: "bg-[linear-gradient(160deg,#8dd0b0,#5ea285)]",
+        score: Math.max(1, 100 - getSeriesScore(weeklyFats)),
       },
     ];
   }, [weeklyBloodGlucose, weeklyCaloriesBurnt, weeklyCaloriesIntake, weeklyProtein, weeklyCarbs, weeklyFats, weeklySteps]);
 
-  const currentActivityCard = activityCards[activeActivityCard] || activityCards[0];
+  const featuredActivityCardIndex = useMemo(() => getFeaturedCardIndex(activityCards), [activityCards]);
+  const currentActivityCard = activityCards[featuredActivityCardIndex] || activityCards[0];
 
   const smartPlan = useMemo(
     () => buildSmartSummary({
@@ -375,16 +426,44 @@ export default function AiInsights({ user, goBack }) {
     setIsLoadingTrends(true);
     setTrendsError("");
     try {
-      const data = await apiFetch("/health/trends", { method: "GET" });
-      setWeeklySleep(prev => normalizeSeries(data.weeklySleep, prev));
-      setWeeklySteps(prev => normalizeSeries(data.weeklySteps, prev));
-      setWeeklyCaloriesBurnt(prev => normalizeSeries(data.weeklyCaloriesBurned, prev));
-      setWeeklyCaloriesIntake(prev => normalizeSeries(data.weeklyCaloriesIntake, prev));
-      setWeeklyProtein(prev => normalizeSeries(data.weeklyProtein, prev));
-      setWeeklyCarbs(prev => normalizeSeries(data.weeklyCarbs, prev));
-      setWeeklyFats(prev => normalizeSeries(data.weeklyFats, prev));
-      setWeeklyBloodGlucose(prev => normalizeSeries(data.weeklyBloodGlucose, prev));
-      setActiveActivityCard(0);
+      const data = await apiFetch("/health/weekly", { method: "GET" });
+      const sleep = normalizeSeries(data.sleep || data.weeklySleep, weeklySleep);
+      const steps = normalizeSeries(data.steps || data.weeklySteps, weeklySteps);
+      const caloriesBurned = normalizeSeries(data.weeklyCaloriesBurned, weeklyCaloriesBurnt);
+      const caloriesIntake = normalizeSeries(data.calories_intake || data.weeklyCaloriesIntake, weeklyCaloriesIntake);
+      const protein = normalizeSeries(data.weeklyProtein, weeklyProtein);
+      const carbs = normalizeSeries(data.weeklyCarbs, weeklyCarbs);
+      const fats = normalizeSeries(data.weeklyFats, weeklyFats);
+      const glucose = normalizeSeries(data.glucose || data.weeklyBloodGlucose, weeklyBloodGlucose);
+
+      setWeeklySleep(prev => sleep);
+      setWeeklySteps(prev => steps);
+      setWeeklyCaloriesBurnt(prev => caloriesBurned);
+      setWeeklyCaloriesIntake(prev => caloriesIntake);
+      setWeeklyProtein(prev => protein);
+      setWeeklyCarbs(prev => carbs);
+      setWeeklyFats(prev => fats);
+      setWeeklyBloodGlucose(prev => glucose);
+
+      try {
+        await apiFetch("/insights/trends-context", {
+          method: "POST",
+          body: JSON.stringify({
+            dates: Array.isArray(data.dates) ? data.dates : [],
+            sleep,
+            steps,
+            glucose,
+            heart_rate: Array.isArray(data.heart_rate) ? data.heart_rate : Array.isArray(data.weeklyHeartRate) ? data.weeklyHeartRate : [],
+            calories_intake: caloriesIntake,
+            weeklyCaloriesBurned: caloriesBurned,
+            weeklyProtein: protein,
+            weeklyCarbs: carbs,
+            weeklyFats: fats,
+          }),
+        });
+      } catch {
+        // Keep the UI working even if context storage fails.
+      }
     } catch {
       setTrendsError("Trend highlights are using database defaults right now.");
       setRecommendation(smartPlan.recommendation);
@@ -449,36 +528,6 @@ export default function AiInsights({ user, goBack }) {
               {currentActivityCard.value}
             </p>
             <p className="mt-3 text-sm leading-relaxed text-[#d6e4f8]">{currentActivityCard.note}</p>
-
-            <div className="mt-4 flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => setActiveActivityCard((previous) => (previous - 1 + activityCards.length) % activityCards.length)}
-                className="rounded-lg border border-[#758fb0] bg-white/10 px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.1em] text-[#e9f2ff]"
-              >
-                Previous
-              </button>
-
-              <div className="flex items-center gap-2">
-                {activityCards.map((card, index) => (
-                  <button
-                    key={card.id}
-                    type="button"
-                    onClick={() => setActiveActivityCard(index)}
-                    aria-label={`Show ${card.id} highlight`}
-                    className={`h-2.5 w-2.5 rounded-full ${index === activeActivityCard ? "bg-[#8fd0ff]" : "bg-white/35"}`}
-                  />
-                ))}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setActiveActivityCard((previous) => (previous + 1) % activityCards.length)}
-                className="rounded-lg border border-[#758fb0] bg-white/10 px-3 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.1em] text-[#e9f2ff]"
-              >
-                Next
-              </button>
-            </div>
           </div>
         </section>
 
