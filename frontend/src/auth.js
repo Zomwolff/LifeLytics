@@ -168,19 +168,17 @@ export async function loginUser({ email, password }) {
     const firebaseUid = credential.user.uid;
 
     const users = loadUsers();
-    let user = users.find((u) => u.id === firebaseUid);
+    const index = users.findIndex((u) => u.email === cleanEmail);
 
-    // Fallback: match by email for accounts created before Firebase sync
-    if (!user) user = users.find((u) => u.email === cleanEmail);
-    if (!user) return { ok: false, error: "No local profile found. Please sign up again." };
+    if (index < 0) return { ok: false, error: "No account found for this email." };
 
-    // Ensure local ID matches Firebase UID
-    if (user.id !== firebaseUid) {
-      const index = users.findIndex((u) => u.email === cleanEmail);
+    // Migrate old UUID-based ID to Firebase UID
+    if (users[index].id !== firebaseUid) {
       users[index] = { ...users[index], id: firebaseUid };
       saveUsers(users);
-      user = users[index];
     }
+
+    const user = users[index];
 
     setSession(firebaseUid);
     return { ok: true, user: toSafeUser(user) };
