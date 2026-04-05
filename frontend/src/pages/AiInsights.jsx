@@ -247,14 +247,14 @@ export default function AiInsights({ user, goBack }) {
 
   return (
     <div
-      className="relative min-h-screen overflow-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-4 py-6"
+      className="relative min-h-screen overflow-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-4 py-6 md:px-8 lg:px-10"
       style={{ fontFamily: "'Sora', sans-serif" }}
     >
       <div className="pointer-events-none absolute -left-24 -top-20 h-64 w-64 rounded-full bg-[radial-gradient(circle,#71bcff_0%,rgba(113,188,255,0.32)_56%,transparent_100%)] blur-2xl" />
       <div className="pointer-events-none absolute -bottom-28 -right-24 h-72 w-72 rounded-full bg-[radial-gradient(circle,#69dcb0_0%,rgba(105,220,176,0.28)_56%,transparent_100%)] blur-2xl" />
 
       <motion.div
-        className="relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[430px] flex-col"
+        className="relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[980px] flex-col"
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
@@ -270,7 +270,7 @@ export default function AiInsights({ user, goBack }) {
           <p className="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-[#3b4f6d]">AI Insights</p>
         </header>
 
-        <section className="rounded-[1.4rem] border border-white/35 bg-[rgba(255,255,255,0.62)] p-4 shadow-[0_10px_22px_rgba(31,43,64,0.14)]">
+        <section className="rounded-[1.4rem] border border-white/35 bg-[rgba(255,255,255,0.62)] p-4 shadow-[0_10px_22px_rgba(31,43,64,0.14)] md:p-5">
           <p className="text-sm font-semibold text-[#2b4467]">Current Snapshot</p>
           <div className="mt-3 grid grid-cols-3 gap-2">
             <CircularMetric label="BMI" value={bmi} suffix="" progress={bmiProgress} color="#4ea9ff" />
@@ -279,7 +279,7 @@ export default function AiInsights({ user, goBack }) {
           </div>
         </section>
 
-        <section className="mt-3 rounded-[1.4rem] border border-white/35 bg-[rgba(255,255,255,0.62)] p-4 shadow-[0_10px_22px_rgba(31,43,64,0.14)]">
+        <section className="mt-3 rounded-[1.4rem] border border-white/35 bg-[rgba(255,255,255,0.62)] p-4 shadow-[0_10px_22px_rgba(31,43,64,0.14)] md:p-5">
           <p className="text-sm font-semibold text-[#2b4467]">Daily Activity Snapshot</p>
           {isLoadingTrends ? <p className="mt-2 text-xs font-semibold text-[#3c5374]">Loading activity highlights...</p> : null}
           {trendsError ? <p className="mt-2 text-xs font-semibold text-[#9e2f2f]">{trendsError}</p> : null}
@@ -326,13 +326,13 @@ export default function AiInsights({ user, goBack }) {
           </div>
         </section>
 
-        <section className="mt-3 rounded-[1.4rem] border border-white/30 bg-[linear-gradient(145deg,#1b273a,#27344a)] p-4 text-white shadow-[0_12px_26px_rgba(17,29,46,0.28)]">
+        <section className="mt-3 rounded-[1.4rem] border border-white/30 bg-[linear-gradient(145deg,#1b273a,#27344a)] p-4 text-white shadow-[0_12px_26px_rgba(17,29,46,0.28)] md:p-5">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#aac4e7]">Recommendation</p>
           <p className="mt-2 text-[0.98rem] leading-relaxed">{isLoadingInsights ? "Loading recommendation..." : recommendation}</p>
           {insightsError ? <p className="mt-2 text-xs font-semibold text-amber-300">{insightsError}</p> : null}
         </section>
 
-        <section className="mt-3 rounded-[1.25rem] border border-white/35 bg-[rgba(255,255,255,0.62)] p-4 shadow-[0_10px_22px_rgba(31,43,64,0.14)]">
+        <section className="mt-3 rounded-[1.25rem] border border-white/35 bg-[rgba(255,255,255,0.62)] p-4 shadow-[0_10px_22px_rgba(31,43,64,0.14)] md:p-5">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#3b4f6d]">Goal Focus</p>
           <div className="mt-2 grid grid-cols-2 gap-2">
             {goals.map((goal) => {

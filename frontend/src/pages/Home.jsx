@@ -200,7 +200,7 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
 
   return (
     <div
-      className="relative min-h-screen overflow-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-4 py-6"
+      className="relative min-h-screen overflow-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-4 py-6 md:px-8 lg:px-10"
       style={{ fontFamily: "'Sora', sans-serif" }}
     >
       <div className="pointer-events-none absolute -left-24 -top-20 h-64 w-64 rounded-full bg-[radial-gradient(circle,#71bcff_0%,rgba(113,188,255,0.32)_56%,transparent_100%)] blur-2xl" />
@@ -214,7 +214,7 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
       />
 
       <motion.div
-        className="relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[430px] flex-col"
+        className="relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[1100px] flex-col"
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
@@ -337,11 +337,11 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
           </p>
         </div>
 
-        <main className="grid grid-cols-2 gap-3">
+        <main className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <button
             type="button"
             onClick={goMetrics}
-            className="row-span-2 min-h-[222px] rounded-[1.5rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 pb-4 pt-6 text-left text-white shadow-[0_12px_26px_rgba(17,29,46,0.28)]"
+            className="row-span-2 min-h-[222px] rounded-[1.5rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 pb-4 pt-6 text-left text-white shadow-[0_12px_26px_rgba(17,29,46,0.28)] md:col-span-2 md:min-h-[300px]"
           >
             <div className="mb-5 grid place-items-center">
               <svg viewBox="0 0 120 70" className="h-16 w-full max-w-[176px]" fill="none" aria-hidden="true">
@@ -421,7 +421,7 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
           <button
             type="button"
             onClick={() => setIsPrescriptionModalOpen(true)}
-            className="col-span-2 min-h-[106px] rounded-[1.35rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-left text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)]"
+            className="col-span-2 min-h-[106px] rounded-[1.35rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-left text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)] md:col-span-4"
           >
             <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="7" width="18" height="13" rx="2" />
@@ -437,7 +437,7 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
           </button>
         </main>
 
-        <div className="mt-auto">
+        <div className="mt-auto md:mx-auto md:w-full md:max-w-[760px]">
           <button
             type="button"
             onClick={goChat}
@@ -466,7 +466,7 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
 
       {isPrescriptionModalOpen ? (
         <div className="fixed inset-0 z-30 grid place-items-center bg-[rgba(10,20,34,0.56)] px-4">
-          <div className="w-full max-w-[430px] rounded-[1.4rem] border border-[#c3d1e3] bg-[linear-gradient(160deg,#f7fbff,#e7f0fb)] p-4 shadow-[0_20px_44px_rgba(7,19,36,0.35)]">
+          <div className="w-full max-w-[760px] rounded-[1.4rem] border border-[#c3d1e3] bg-[linear-gradient(160deg,#f7fbff,#e7f0fb)] p-4 shadow-[0_20px_44px_rgba(7,19,36,0.35)]">
             <div className="mb-3 flex items-center justify-between">
               <p
                 className="text-[1.08rem] font-bold text-[#16233a]"
@@ -518,7 +518,7 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
 
             <div className="mt-3 min-h-[120px] rounded-xl border border-[#bccbdd] bg-white/70 p-2">
               {previewUrl ? (
-                <img src={previewUrl} alt="Selected report" className="h-32 w-full rounded-lg object-cover" />
+                <img src={previewUrl} alt="Selected report" className="h-32 w-full rounded-lg object-cover md:h-44" />
               ) : (
                 <p className="pt-10 text-center text-xs font-medium text-[#4e6486]">Upload or capture a report image to begin scanning.</p>
               )}

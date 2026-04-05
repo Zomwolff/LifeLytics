@@ -20,21 +20,21 @@ export default function SetupMetrics({ user, onContinue }) {
 
   return (
     <div
-      className="relative min-h-screen overflow-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-4 py-6"
+      className="relative min-h-screen overflow-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-4 py-6 md:px-8 lg:px-10"
       style={{ fontFamily: "'Sora', sans-serif" }}
     >
       <div className="pointer-events-none absolute -left-24 -top-20 h-64 w-64 rounded-full bg-[radial-gradient(circle,#71bcff_0%,rgba(113,188,255,0.32)_56%,transparent_100%)] blur-2xl" />
       <div className="pointer-events-none absolute -bottom-28 -right-24 h-72 w-72 rounded-full bg-[radial-gradient(circle,#69dcb0_0%,rgba(105,220,176,0.28)_56%,transparent_100%)] blur-2xl" />
 
       <motion.div
-        className="relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[430px] items-center justify-center"
+        className="relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[1100px] items-center justify-center"
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
       >
         <motion.form
           onSubmit={handleSave}
-          className="w-full max-w-[360px] rounded-[2rem] border border-white/55 bg-[linear-gradient(150deg,rgba(255,255,255,0.88),rgba(250,252,255,0.56))] px-5 py-6 shadow-[0_18px_40px_rgba(36,44,57,0.16)] backdrop-blur-[5px]"
+          className="w-full max-w-[360px] rounded-[2rem] border border-white/55 bg-[linear-gradient(150deg,rgba(255,255,255,0.88),rgba(250,252,255,0.56))] px-5 py-6 shadow-[0_18px_40px_rgba(36,44,57,0.16)] backdrop-blur-[5px] md:max-w-[460px] md:px-7 md:py-7"
           initial={{ scale: 0.98, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ duration: 0.45, delay: 0.08 }}

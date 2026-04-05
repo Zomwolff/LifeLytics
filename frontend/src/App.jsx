@@ -109,7 +109,7 @@ export default function App() {
   if (page === "profile") return <Profile user={user} onSaveField={handleSaveProfileField} goBack={() => setPage("home")} />;
   if (page === "ai-insights") return <AiInsights user={user} goBack={() => setPage("home")} />;
   if (page === "chat") return <Chatbot user={user} goBack={() => setPage(chatReturnPage)} />;
-  if (page === "metrics") return <Metrics user={user} onLogout={handleLogout} goHome={() => setPage("home")} goProfile={() => setPage("profile")} goMetrics={() => setPage("metrics")} goChat={() => { setChatReturnPage("metrics"); setPage("chat"); }} />;
+  if (page === "metrics") return <Metrics user={user} onLogout={handleLogout} goBack={() => setPage("home")} goHome={() => setPage("home")} goProfile={() => setPage("profile")} goMetrics={() => setPage("metrics")} goChat={() => { setChatReturnPage("metrics"); setPage("chat"); }} />;
   if (page === "trends") return <Trends user={user} goBack={() => setPage("home")} />;
   return <Home user={user} onLogout={handleLogout} goHome={() => setPage("home")} goProfile={() => setPage("profile")} goMetrics={() => setPage("metrics")} goTrends={() => setPage("trends")} goAi={() => setPage("ai-insights")} goChat={() => { setChatReturnPage("home"); setPage("chat"); }} />;
 }

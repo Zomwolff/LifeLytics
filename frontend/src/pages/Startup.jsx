@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 export default function Startup({ goLogin, goSignup }) {
   return (
     <div
-      className="relative min-h-screen overflow-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-4 py-6"
+      className="relative min-h-screen overflow-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-4 py-6 md:px-8 lg:px-10"
       style={{ fontFamily: "'Sora', sans-serif" }}
     >
       <div className="pointer-events-none absolute -left-24 -top-20 h-64 w-64 rounded-full bg-[radial-gradient(circle,#71bcff_0%,rgba(113,188,255,0.32)_56%,transparent_100%)] blur-2xl" />
@@ -17,13 +17,13 @@ export default function Startup({ goLogin, goSignup }) {
       />
 
       <motion.div
-        className="relative z-10 mx-auto grid min-h-[calc(100vh-3rem)] w-full max-w-[430px] grid-rows-[auto_1fr_auto] gap-6"
+        className="relative z-10 mx-auto grid min-h-[calc(100vh-3rem)] w-full max-w-[1100px] grid-rows-[auto_1fr_auto] gap-6 md:grid-cols-2 md:grid-rows-1 md:items-center md:gap-10"
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
       >
         <motion.div
-          className="pt-3 text-center"
+          className="pt-3 text-center md:pt-0 md:text-left"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.46, delay: 0.06 }}
@@ -32,18 +32,18 @@ export default function Startup({ goLogin, goSignup }) {
             LifeLytics
           </p>
           <h1
-            className="mx-auto max-w-[320px] text-[2.15rem] font-bold leading-[1.05] text-[#131722] sm:text-[2.45rem]"
+            className="mx-auto max-w-[320px] text-[2.15rem] font-bold leading-[1.05] text-[#131722] sm:text-[2.45rem] md:mx-0 md:max-w-[520px] md:text-[2.8rem] lg:text-[3.2rem]"
             style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}
           >
             Shape your body goals with calm precision.
           </h1>
-          <p className="mx-auto mt-3 max-w-[290px] text-[0.92rem] leading-relaxed text-[#4b566a]">
+          <p className="mx-auto mt-3 max-w-[290px] text-[0.92rem] leading-relaxed text-[#4b566a] md:mx-0 md:max-w-[460px] md:text-[1rem]">
             Track wellness, learn from AI insights, and stay consistent with a dashboard built for everyday momentum.
           </p>
         </motion.div>
 
         <motion.div
-          className="grid w-full grid-cols-2 gap-4 pb-2"
+          className="grid w-full grid-cols-2 gap-4 pb-2 md:max-w-[430px] md:justify-self-end md:pb-0"
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.45, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}

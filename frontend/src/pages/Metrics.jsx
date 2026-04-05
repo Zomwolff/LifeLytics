@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 
-export default function Metrics({ user, goHome, goChat, goMetrics, goProfile, onLogout }) {
+export default function Metrics({ user, goBack, goHome, goChat, goMetrics, goProfile, onLogout }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const bmi = Number.isFinite(user?.heightCm) && Number.isFinite(user?.weightKg)
@@ -11,9 +11,17 @@ export default function Metrics({ user, goHome, goChat, goMetrics, goProfile, on
   const bmiArcColor = !bmi ? "#7ebeff" : bmi < 18.5 ? "#7ebeff" : bmi <= 24.9 ? "#6de1a7" : bmi <= 29.9 ? "#f6c96f" : "#f08a8a";
   const bmiCategory = !bmi ? "No data" : bmi < 18.5 ? "Underweight" : bmi <= 24.9 ? "Normal" : bmi <= 29.9 ? "Overweight" : "Obese";
 
+  function handleBack() {
+    setIsMenuOpen(false);
+    setIsProfileMenuOpen(false);
+    if (typeof goBack === "function") {
+      goBack();
+    }
+  }
+
   return (
     <div
-      className="relative min-h-screen overflow-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-4 py-6"
+      className="relative min-h-screen overflow-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-4 py-6 md:px-8 lg:px-10"
       style={{ fontFamily: "'Sora', sans-serif" }}
     >
       <div className="pointer-events-none absolute -left-24 -top-20 h-64 w-64 rounded-full bg-[radial-gradient(circle,#71bcff_0%,rgba(113,188,255,0.32)_56%,transparent_100%)] blur-2xl" />
@@ -27,55 +35,64 @@ export default function Metrics({ user, goHome, goChat, goMetrics, goProfile, on
       />
 
       <motion.div
-        className="relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[430px] flex-col"
+        className="relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[980px] flex-col"
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
       >
         <header className="mb-4 flex items-center justify-between">
-          <div className="relative">
-            <button
-              type="button"
-              aria-label="Open profile menu"
-              onClick={() => {
-                setIsMenuOpen(false);
-                setIsProfileMenuOpen((prev) => !prev);
-              }}
-              className="grid h-10 w-10 place-items-center rounded-full border border-white/60 bg-[rgba(255,255,255,0.72)] text-[#1f3150] shadow-[0_8px_20px_rgba(31,43,64,0.16)]"
-            >
-              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="8" r="3.5" />
-                <path d="M5 19c1.3-3.2 3.7-5 7-5s5.7 1.8 7 5" />
-              </svg>
-            </button>
+          <button
+            type="button"
+            aria-label="Go back"
+            onClick={handleBack}
+            className="rounded-full border border-[#95a8c4] bg-[rgba(255,255,255,0.7)] px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[#29405e]"
+          >
+            Back
+          </button>
 
-            {isProfileMenuOpen ? (
-              <div className="absolute left-0 top-12 z-20 w-36 overflow-hidden rounded-xl border border-[#a3b3cb] bg-[rgba(255,255,255,0.95)] shadow-[0_10px_22px_rgba(31,43,64,0.2)]">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsProfileMenuOpen(false);
-                    goProfile();
-                  }}
-                  className="w-full px-3 py-2 text-left text-sm font-semibold text-[#20314a] hover:bg-[#eef3fb]"
-                >
-                  Profile
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsProfileMenuOpen(false);
-                    onLogout();
-                  }}
-                  className="w-full border-t border-[#d0d9e8] px-3 py-2 text-left text-sm font-semibold text-[#9e2f2f] hover:bg-[#fff1f1]"
-                >
-                  Logout
-                </button>
-              </div>
-            ) : null}
-          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <button
+                type="button"
+                aria-label="Open profile menu"
+                onClick={() => {
+                  setIsMenuOpen(false);
+                  setIsProfileMenuOpen((prev) => !prev);
+                }}
+                className="grid h-10 w-10 place-items-center rounded-full border border-white/60 bg-[rgba(255,255,255,0.72)] text-[#1f3150] shadow-[0_8px_20px_rgba(31,43,64,0.16)]"
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="8" r="3.5" />
+                  <path d="M5 19c1.3-3.2 3.7-5 7-5s5.7 1.8 7 5" />
+                </svg>
+              </button>
 
-          <div className="relative">
+              {isProfileMenuOpen ? (
+                <div className="absolute right-0 top-12 z-20 w-36 overflow-hidden rounded-xl border border-[#a3b3cb] bg-[rgba(255,255,255,0.95)] shadow-[0_10px_22px_rgba(31,43,64,0.2)]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsProfileMenuOpen(false);
+                      goProfile();
+                    }}
+                    className="w-full px-3 py-2 text-left text-sm font-semibold text-[#20314a] hover:bg-[#eef3fb]"
+                  >
+                    Profile
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsProfileMenuOpen(false);
+                      onLogout();
+                    }}
+                    className="w-full border-t border-[#d0d9e8] px-3 py-2 text-left text-sm font-semibold text-[#9e2f2f] hover:bg-[#fff1f1]"
+                  >
+                    Logout
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
             <button
               type="button"
               aria-label="Open menu"
@@ -138,8 +155,8 @@ export default function Metrics({ user, goHome, goChat, goMetrics, goProfile, on
           </div>
         </div>
 
-        <main className="space-y-3">
-          <section className="rounded-[1.5rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] p-4 text-white shadow-[0_12px_26px_rgba(17,29,46,0.28)]">
+        <main className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <section className="rounded-[1.5rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] p-4 text-white shadow-[0_12px_26px_rgba(17,29,46,0.28)] md:row-span-2">
             <div className="mb-4 grid place-items-center">
               <svg viewBox="0 0 120 70" className="h-16 w-full max-w-[176px]" fill="none" aria-hidden="true">
                 <path d="M12 56a48 48 0 0 1 96 0" stroke="rgba(158,207,255,0.35)" strokeWidth="7" strokeLinecap="round" />
@@ -190,7 +207,7 @@ export default function Metrics({ user, goHome, goChat, goMetrics, goProfile, on
           </section>
         </main>
 
-        <div className="mt-auto">
+        <div className="mt-auto md:mx-auto md:w-full md:max-w-[760px]">
           <button
             type="button"
             onClick={goChat}
