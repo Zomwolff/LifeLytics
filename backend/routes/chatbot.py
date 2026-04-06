@@ -1,13 +1,8 @@
-"""AI chatbot routes.
-
-Endpoints:
-- POST /chatbot - Send message to chatbot
-"""
-
+"""AI chatbot routes."""
 from fastapi import APIRouter, Depends, HTTPException
-
 from backend.models.schemas import ChatRequest, ChatResponse
 from backend.utils import auth
+from backend.utils import firestore_db
 from backend.services import chatbotService
 
 router = APIRouter()
@@ -18,19 +13,28 @@ async def chat(
     payload: ChatRequest,
     userId: str = Depends(auth.getCurrentUserDependency),
 ):
-    """Send a message to the health chatbot.
-
-    Returns intelligent, context-aware responses based on user health data.
-    Integrates with LLM with fallback models and detailed error reporting.
-
-    Response includes:
-    - response: The chatbot's answer
-    - (Optional) llm_used, model_used, llm_status in headers for debugging
-    """
     try:
         result = await chatbotService.respond(payload.message, userId)
-        # Extract response for ChatResponse model
         return {"response": result.get("response", "Unable to generate response")}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.get("/history")
+async def getChatHistory(userId: str = Depends(auth.getCurrentUserDependency)):
+    """Get persistent chat history for the user."""
+    try:
+        history = await firestore_db.getChatHistory(userId, limit=50)
+        return {"history": history, "count": len(history)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/history")
+async def clearChatHistory(userId: str = Depends(auth.getCurrentUserDependency)):
+    """Clear all chat history for the user."""
+    try:
+        await firestore_db.clearChatHistory(userId)
+        return {"message": "Chat history cleared"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

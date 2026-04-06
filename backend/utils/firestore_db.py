@@ -4,6 +4,8 @@ Provides async wrappers around Firestore operations for users, health logs,
 insights, reports, and related collections.
 """
 
+import uuid
+from firebase_admin import firestore
 import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional
@@ -350,6 +352,11 @@ async def deleteUserData(userId: str) -> bool:
         for report in reports:
             report.reference.delete()
 
+        # Delete chat history
+        chat = _user_ref(db, userId).collection("chat_history").stream()
+        for msg in chat:
+            msg.reference.delete()
+
         # Delete user document
         _user_ref(db, userId).delete()
         logger.info(f"Deleted all data for user {userId}")
@@ -374,48 +381,6 @@ async def updateUserProfile(userId: str, updates: Dict[str, Any]) -> bool:
     except Exception as e:
         logger.error(f"Error updating user profile {userId}: {str(e)}")
         return False
-
-
-async def saveReport(userId: str, reportData: Dict[str, Any]) -> Optional[str]:
-    """Save parsed report into users/{user_id}/reports."""
-    try:
-        db = getFirestoreClient()
-        if not db:
-            logger.error("Firestore client not available")
-            return None
-
-        payload = {
-            **reportData,
-            "timestamp": datetime.now().isoformat(),
-        }
-        _log_write(userId)
-        _, ref = _user_ref(db, userId).collection("reports").add(payload)
-        return ref.id
-    except Exception as e:
-        logger.error(f"Error saving report for {userId}: {str(e)}")
-        return None
-
-
-async def getReports(userId: str) -> List[Dict[str, Any]]:
-    """Get reports from users/{user_id}/reports."""
-    try:
-        db = getFirestoreClient()
-        if not db:
-            logger.error("Firestore client not available")
-            return []
-
-        _log_read(userId)
-        docs = _user_ref(db, userId).collection("reports").stream()
-        reports: List[Dict[str, Any]] = []
-        for doc in docs:
-            row = doc.to_dict()
-            row["id"] = doc.id
-            reports.append(row)
-        reports.sort(key=lambda item: item.get("timestamp", ""), reverse=True)
-        return reports
-    except Exception as e:
-        logger.error(f"Error getting reports for {userId}: {str(e)}")
-        return []
 
 
 async def getCollectionDocs(userId: str, collectionName: str) -> List[Dict[str, Any]]:
@@ -458,4 +423,104 @@ async def addCollectionDoc(
         logger.error(
             f"Error adding document to collection {collectionName} for {userId}: {str(e)}"
         )
+        return False
+
+async def saveReport(userId: str, parsed: Dict[str, Any]) -> Optional[str]:
+    """Save parsed report to users/{userId}/reports subcollection."""
+    try:
+        db = getFirestoreClient()
+        if not db:
+            return None
+        reportId = parsed.get("scanId") or str(uuid.uuid4())
+        _log_write(userId)
+        _user_ref(db, userId).collection("reports").document(reportId).set({
+            "reportId": reportId,
+            "userId": userId,
+            "filename": parsed.get("filename"),
+            "uploadedAt": datetime.now().isoformat(),
+            "status": parsed.get("status", "good"),
+            "summary": parsed.get("summary", ""),
+            "details": parsed.get("details", ""),
+            "nextCheckIn": parsed.get("nextCheckIn"),
+            "nutrients": parsed.get("nutrients", {}),
+            "metabolicMarkers": parsed.get("metabolic_markers", {}),
+            "followUpHistory": [],
+        })
+        logger.info(f"Saved report {reportId} for user {userId}")
+        return reportId
+    except Exception as e:
+        logger.error(f"Failed to save report: {e}")
+        return None
+
+
+async def getReports(userId: str) -> List[Dict[str, Any]]:
+    """Get all reports from users/{userId}/reports subcollection."""
+    try:
+        db = getFirestoreClient()
+        if not db:
+            return []
+        _log_read(userId)
+        docs = _user_ref(db, userId).collection("reports").stream()
+        reports = []
+        for doc in docs:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            reports.append(data)
+        reports.sort(key=lambda x: x.get("uploadedAt", ""), reverse=True)
+        return reports
+    except Exception as e:
+        logger.error(f"Failed to get reports: {e}")
+        return []
+    
+async def saveChatMessage(userId: str, role: str, text: str) -> Optional[str]:
+    """Save a single chat message to users/{userId}/chat_history."""
+    try:
+        db = getFirestoreClient()
+        if not db:
+            return None
+        _log_write(userId)
+        _, ref = _user_ref(db, userId).collection("chat_history").add({
+            "role": role,
+            "text": text,
+            "timestamp": datetime.now().isoformat(),
+        })
+        return ref.id
+    except Exception as e:
+        logger.error(f"Error saving chat message for {userId}: {str(e)}")
+        return None
+
+
+async def getChatHistory(userId: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """Get recent chat history for a user, oldest first."""
+    try:
+        db = getFirestoreClient()
+        if not db:
+            return []
+        _log_read(userId)
+        docs = _user_ref(db, userId).collection("chat_history").stream()
+        messages = []
+        for doc in docs:
+            row = doc.to_dict()
+            row["id"] = doc.id
+            messages.append(row)
+        messages.sort(key=lambda x: x.get("timestamp", ""))
+        return messages[-limit:]  # return last N messages
+    except Exception as e:
+        logger.error(f"Error getting chat history for {userId}: {str(e)}")
+        return []
+
+
+async def clearChatHistory(userId: str) -> bool:
+    """Clear all chat history for a user."""
+    try:
+        db = getFirestoreClient()
+        if not db:
+            return False
+        docs = _user_ref(db, userId).collection("chat_history").stream()
+        for doc in docs:
+            doc.reference.delete()
+        logger.info(f"Cleared chat history for {userId}")
+        return True
+    except Exception as e:
+        logger.error(f"Error clearing chat history for {userId}: {str(e)}")
         return False
