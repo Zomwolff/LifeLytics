@@ -30,9 +30,12 @@ async def respond(message: str, userId: str) -> Dict[str, Any]:
             glucose = await firestore_db.getCollectionDocs(userId, "glucose")
             smartwatch = await firestore_db.getCollectionDocs(userId, "smartwatch")
             meals = await firestore_db.getCollectionDocs(userId, "meals")
-            reports = await firestore_db.getCollectionDocs(userId, "reports")
-            chat_history = await firestore_db.getChatHistory(userId)
+            reports = await firestore_db.getReports(userId)  # use getReports not getCollectionDocs
+            chat_history = await firestore_db.getChatHistory(userId, limit=20)
             trend_context = await firestore_db.getLatestTrendContext(userId) or {}
+
+            # Save user message before LLM call
+            await firestore_db.saveChatMessage(userId, "user", message)
 
             userContext = {
                 **user_profile,
@@ -45,7 +48,7 @@ async def respond(message: str, userId: str) -> Dict[str, Any]:
 
             healthMetrics = _extractHealthMetrics(userContext)
             prescriptionContext = _buildPrescriptionContext(reports)
-            historyContext = _buildHistoryContext(chat_history)
+            historyContext = _buildHistoryContext(chat_history, reports)
 
             msgPreview = message[:50] + "..." if len(message) > 50 else message
             logger.info(f"Processing chat for user {userId}: {msgPreview}")
@@ -70,7 +73,7 @@ async def respond(message: str, userId: str) -> Dict[str, Any]:
             responseText = _ensureChatResponse(llmResponse.get("response"), message)
             llmResponse["response"] = responseText
 
-            await firestore_db.saveChatMessage(userId, "user", message)
+            # Save assistant response
             await firestore_db.saveChatMessage(userId, "assistant", responseText)
 
             logger.info(f"Chat response for {userId} in {timer.elapsed:.2f}s")
@@ -119,18 +122,50 @@ def _buildPrescriptionContext(reports: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _buildHistoryContext(chat_history: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+def _buildHistoryContext(
+    chat_history: List[Dict[str, Any]],
+    reports: List[Dict[str, Any]],
+) -> List[Dict[str, str]]:
+    """Convert report history + chat history into LLM message turns."""
     messages = []
+
+    # Inject reports as early assistant messages so LLM treats them as known context
+    for i, report in enumerate(reports[:5]):
+        status = report.get("status", "unknown")
+        filename = report.get("filename", f"Report {i+1}")
+        timestamp = report.get("uploadedAt", "")[:10] if report.get("uploadedAt") else ""
+        summary = report.get("summary", "")
+        nutrients = report.get("nutrients", {})
+        markers = report.get("metabolicMarkers", report.get("metabolic_markers", {}))
+
+        low = [k for k, v in nutrients.items() if str(v).lower() in ["low", "deficient"]]
+        high = [k for k, v in nutrients.items() if str(v).lower() in ["high", "elevated", "excess"]]
+        abnormal = [k for k, v in markers.items() if str(v).lower() != "normal"]
+
+        report_text = f"I've reviewed your health report '{filename}' ({timestamp}). "
+        report_text += f"Overall status: {status}. {summary}"
+        if low:
+            report_text += f" Low nutrients: {', '.join(low)}."
+        if high:
+            report_text += f" Elevated nutrients: {', '.join(high)}."
+        if abnormal:
+            report_text += f" Abnormal metabolic markers: {', '.join(abnormal)}."
+        report_text += " Let me know if you have questions about these findings."
+
+        messages.append({"role": "user", "content": f"Can you review my report '{filename}'?"})
+        messages.append({"role": "assistant", "content": report_text})
+
+    # Then append real conversation history
     for msg in chat_history:
         role = msg.get("role", "user")
         text = msg.get("text", "")
         if role in ("user", "assistant") and text:
             messages.append({"role": role, "content": text})
+
     return messages
 
 
 def _extractHealthMetrics(userContext: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract and normalize health metrics from user context."""
     height_cm = _to_number(userContext.get("heightCm"), 0)
     height = _to_number(userContext.get("height"), 0)
     if height_cm > 0:
@@ -143,7 +178,6 @@ def _extractHealthMetrics(userContext: Dict[str, Any]) -> Dict[str, Any]:
     bmi = round(weight / (height * height), 1) if height > 0 and weight > 0 else None
 
     trend_context = userContext.get("trend_context") or {}
-
     trend_sleep = _numeric_series(trend_context.get("sleep") or trend_context.get("weeklySleep"))
     trend_steps = _numeric_series(trend_context.get("steps") or trend_context.get("weeklySteps"))
     trend_glucose = _numeric_series(trend_context.get("glucose") or trend_context.get("weeklyBloodGlucose"))
@@ -152,54 +186,37 @@ def _extractHealthMetrics(userContext: Dict[str, Any]) -> Dict[str, Any]:
     smartwatch = userContext.get("smartwatch") or []
     health_logs = userContext.get("health_logs") or []
     glucose_rows = userContext.get("glucose") or []
+    meals = userContext.get("meals") or []
 
     sleep_values = [
-        max(
-            _to_number(row.get("sleepDuration"), 0),
-            _to_number(row.get("sleep"), 0),
-        )
+        max(_to_number(row.get("sleepDuration"), 0), _to_number(row.get("sleep"), 0))
         for row in [*smartwatch, *health_logs]
         if max(_to_number(row.get("sleepDuration"), 0), _to_number(row.get("sleep"), 0)) > 0
     ] or trend_sleep
 
     steps_values = [
-        max(
-            _to_number(row.get("steps"), 0),
-            _to_number(row.get("stepCount"), 0),
-        )
+        max(_to_number(row.get("steps"), 0), _to_number(row.get("stepCount"), 0))
         for row in [*smartwatch, *health_logs]
         if max(_to_number(row.get("steps"), 0), _to_number(row.get("stepCount"), 0)) > 0
     ] or trend_steps
 
     glucose_values = [
-        value
-        for value in [
-            *[
-                _pick_first_number(row, ["glucoseLevel", "value", "glucose"])
-                for row in glucose_rows
-            ],
-            *[
-                _pick_first_number(row, ["glucose", "glucoseLevel", "value"])
-                for row in health_logs
-            ],
-        ]
-        if value > 0
+        v for v in [
+            *[_pick_first_number(row, ["glucoseLevel", "value", "glucose"]) for row in glucose_rows],
+            *[_pick_first_number(row, ["glucose", "glucoseLevel", "value"]) for row in health_logs],
+        ] if v > 0
     ] or trend_glucose
 
     heart_rate_values = [
-        value
-        for value in [
+        v for v in [
             *[_pick_first_number(row, ["heartRate", "avgHeartRate"]) for row in smartwatch],
             *[_pick_first_number(row, ["heartRate", "avgHeartRate"]) for row in health_logs],
-        ]
-        if value > 0
+        ] if v > 0
     ] or trend_heart
 
-    meals = userContext.get("meals") or []
     calories_values = [
-        _pick_first_number(row, ["calories"]) for row in meals
+        v for v in [_pick_first_number(row, ["calories"]) for row in meals] if v > 0
     ]
-    calories_values = [value for value in calories_values if value > 0]
 
     return {
         "height": height,
@@ -248,12 +265,7 @@ def _pick_first_number(row: Dict[str, Any], keys: List[str], default: float = 0.
 def _numeric_series(values: Any) -> List[float]:
     if not isinstance(values, list):
         return []
-    output: List[float] = []
-    for value in values:
-        parsed = _to_number(value, 0.0)
-        if parsed > 0:
-            output.append(parsed)
-    return output
+    return [p for p in [_to_number(v, 0.0) for v in values] if p > 0]
 
 
 def _average(values: List[float]) -> float:
