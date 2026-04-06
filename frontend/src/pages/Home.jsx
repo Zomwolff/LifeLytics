@@ -444,12 +444,12 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
     >
 
       {isIntakeModalOpen ? (
-        <div className="fixed inset-0 z-30 grid place-items-center bg-[rgba(10,20,34,0.56)] px-4 py-4">
-          <div className="relative w-full max-w-[1120px] rounded-[1.9rem] border border-[#d0dbee] bg-[linear-gradient(180deg,#f9fbff,#e8f0fb)] p-4 shadow-[0_24px_52px_rgba(7,19,36,0.4)] md:p-5">
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-[rgba(10,20,34,0.56)] px-4 py-4 overflow-y-auto">
+          <div className="relative w-full max-w-[1120px] rounded-[1.9rem] border border-[#d0dbee] bg-[linear-gradient(180deg,#f9fbff,#e8f0fb)] p-4 shadow-[0_24px_52px_rgba(7,19,36,0.4)] md:p-5 my-auto max-h-[90vh] overflow-y-auto">
             <button
               type="button"
               onClick={() => setIsIntakeModalOpen(false)}
-              className="absolute right-4 top-4 rounded-full border border-[#b6c6da] bg-white px-4 py-2 text-sm font-semibold text-[#29405e] shadow-sm"
+              className="sticky top-4 right-4 z-10 float-right rounded-full border border-[#b6c6da] bg-white px-4 py-2 text-sm font-semibold text-[#29405e] shadow-sm hover:bg-[#f5f8fc] transition"
             >
               Close
             </button>
@@ -466,7 +466,7 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
                 <IntakeRing intake={todayIntake} />
               </div>
 
-              <div className="rounded-[1.5rem] border border-[#d2dcec] bg-white/90 p-4 shadow-[0_8px_18px_rgba(31,43,64,0.08)]">
+              <div className="rounded-[1.5rem] border border-[#d2dcec] bg-white/90 p-4 shadow-[0_8px_18px_rgba(31,43,64,0.08)] max-h-[400px] overflow-y-auto">
                 <p className="text-center text-[0.85rem] font-bold uppercase tracking-[0.16em] text-[#58739a]">Macro Breakdown</p>
                 <div className="mt-4 space-y-3">
                   {(() => {
@@ -480,17 +480,17 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
 
                     return (
                       <>
-                        <div className="rounded-[1rem] border border-[#d2dcec] bg-[#f4f7fd] px-4 py-4 text-center">
+                        <div className="rounded-[1rem] border border-[#d2dcec] bg-[#f4f7fd] px-4 py-4 text-center hover:shadow-[0_4px_12px_rgba(79,145,242,0.1)] transition">
                           <p className="text-[0.82rem] font-bold uppercase tracking-[0.16em] text-[#58739a]">Protein</p>
                           <p className="mt-2 text-[1.65rem] font-bold text-[#21314a]">{todayIntake.protein.toFixed(0)} g</p>
                           <p className="mt-1 text-sm text-[#6b7f99]">{proteinCals.toFixed(0)} kcal ({proteinPct}%)</p>
                         </div>
-                        <div className="rounded-[1rem] border border-[#d2dcec] bg-[#f2fbf5] px-4 py-4 text-center">
+                        <div className="rounded-[1rem] border border-[#d2dcec] bg-[#f2fbf5] px-4 py-4 text-center hover:shadow-[0_4px_12px_rgba(93,193,150,0.1)] transition">
                           <p className="text-[0.82rem] font-bold uppercase tracking-[0.16em] text-[#58739a]">Carbs</p>
                           <p className="mt-2 text-[1.65rem] font-bold text-[#21314a]">{todayIntake.carbs.toFixed(0)} g</p>
                           <p className="mt-1 text-sm text-[#6b7f99]">{carbsCals.toFixed(0)} kcal ({carbsPct}%)</p>
                         </div>
-                        <div className="rounded-[1rem] border border-[#d2dcec] bg-[#fff5eb] px-4 py-4 text-center">
+                        <div className="rounded-[1rem] border border-[#d2dcec] bg-[#fff5eb] px-4 py-4 text-center hover:shadow-[0_4px_12px_rgba(244,161,100,0.1)] transition">
                           <p className="text-[0.82rem] font-bold uppercase tracking-[0.16em] text-[#58739a]">Fats</p>
                           <p className="mt-2 text-[1.65rem] font-bold text-[#21314a]">{todayIntake.fats.toFixed(0)} g</p>
                           <p className="mt-1 text-sm text-[#6b7f99]">{fatsCals.toFixed(0)} kcal ({fatsPct}%)</p>
@@ -685,64 +685,70 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
             </div>
           </button>
 
-          <button
-            type="button"
-            onClick={goAi}
-            className="min-h-[104px] rounded-[1.25rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-left text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)]"
-          >
-            <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 2a6 6 0 0 0-3.8 10.7c1 .8 1.8 2 1.8 3.3h4c0-1.3.8-2.5 1.8-3.3A6 6 0 0 0 12 2z" />
-              <path d="M9.5 19h5" />
-              <path d="M10.4 22h3.2" />
-            </svg>
-            <p
-              className="mt-1 text-[1.75rem] font-bold leading-[1.03] tracking-[-0.01em]"
-              style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}
+          <div className="relative row-span-2 min-h-[222px] md:col-span-2 md:min-h-[300px]">
+            <div
+              className="h-full w-full rounded-[1.5rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-left text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)]"
             >
-              AI
-            </p>
-            <p
-              className="text-[1.75rem] font-bold leading-[1.03] tracking-[-0.01em]"
-              style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}
-            >
-              Insights
-            </p>
-          </button>
-
-          <button
-            type="button"
-            onClick={goTrends}
-            className="min-h-[104px] rounded-[1.25rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-left text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)]"
-          >
-            <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.2">
-              <path d="M3 17l6-6 4 4 7-7" />
-              <path d="M14 8h6v6" />
-            </svg>
-            <p
-              className="mt-2 text-[1.75rem] font-bold leading-[1.04] tracking-[-0.01em]"
-              style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}
-            >
-              Trends
-            </p>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsPrescriptionModalOpen(true)}
-            className="col-span-2 min-h-[106px] rounded-[1.35rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-left text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)] md:col-span-2"
-          >
-            <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="7" width="18" height="13" rx="2" />
-              <path d="M8 7l1.3-2h5.4L16 7" />
-              <circle cx="12" cy="13.5" r="3.2" />
-            </svg>
-            <p
-              className="mt-1 text-[1.7rem] font-bold leading-[1.02] tracking-[-0.01em]"
-              style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}
-            >
-              Report Insights
-            </p>
-          </button>
+              <div className="space-y-2 h-full flex flex-col justify-center">
+                <button
+                  type="button"
+                  onClick={() => goAi()}
+                  className="w-full px-4 py-3 text-left text-sm font-semibold text-[#20314a] hover:bg-white/10 rounded-[0.9rem] transition-all bg-white/5"
+                >
+                  <span className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-[0.75rem] bg-[linear-gradient(135deg,#cce5ff,#e0eaff)]">
+                      <svg viewBox="0 0 24 24" className="h-5 w-5 text-[#4f91f2]" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M12 2a6 6 0 0 0-3.8 10.7c1 .8 1.8 2 1.8 3.3h4c0-1.3.8-2.5 1.8-3.3A6 6 0 0 0 12 2z" />
+                        <path d="M9.5 19h5" />
+                        <path d="M10.4 22h3.2" />
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-bold text-white">AI Insights</p>
+                      <p className="text-xs text-[#a7c1e4]">Smart analysis</p>
+                    </div>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => goTrends()}
+                  className="w-full px-4 py-3 text-left text-sm font-semibold text-[#20314a] hover:bg-white/10 rounded-[0.9rem] transition-all bg-white/5"
+                >
+                  <span className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-[0.75rem] bg-[linear-gradient(135deg,#d4f0e7,#e3f5f0)]">
+                      <svg viewBox="0 0 24 24" className="h-5 w-5 text-[#5dc196]" fill="none" stroke="currentColor" strokeWidth="2.2">
+                        <path d="M3 17l6-6 4 4 7-7" />
+                        <path d="M14 8h6v6" />
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-bold text-white">Trends</p>
+                      <p className="text-xs text-[#a7c1e4]">Your progress</p>
+                    </div>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPrescriptionModalOpen(true)}
+                  className="w-full px-4 py-3 text-left text-sm font-semibold text-[#20314a] hover:bg-white/10 rounded-[0.9rem] transition-all bg-white/5"
+                >
+                  <span className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-[0.75rem] bg-[linear-gradient(135deg,#f5e0ce,#fae8d7)]">
+                      <svg viewBox="0 0 24 24" className="h-5 w-5 text-[#f4a164]" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="3" y="7" width="18" height="13" rx="2" />
+                        <path d="M8 7l1.3-2h5.4L16 7" />
+                        <circle cx="12" cy="13.5" r="3.2" />
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-bold text-white">Report Insights</p>
+                      <p className="text-xs text-[#a7c1e4]">Health reports</p>
+                    </div>
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
 
           <button
             type="button"
