@@ -439,7 +439,7 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
 
   return (
     <div
-      className="relative min-h-screen overflow-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-4 py-6 md:px-8 lg:px-10"
+      className="relative min-h-screen overflow-x-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-3 py-4 sm:px-4 sm:py-6 md:px-8 lg:px-10"
       style={{ fontFamily: "'Sora', sans-serif" }}
     >
 
@@ -519,7 +519,7 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
       />
 
       <motion.div
-        className="relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[1100px] flex-col"
+        className="relative z-10 mx-auto flex min-h-[calc(100dvh-2rem)] w-full max-w-[1100px] flex-col pb-[calc(6.5rem+env(safe-area-inset-bottom))] sm:min-h-[calc(100vh-3rem)]"
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
@@ -645,7 +645,7 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
           </p>
         </div>
 
-        <main className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <main className="grid grid-cols-2 gap-3.5 md:grid-cols-4 md:gap-3">
           <button
             type="button"
             onClick={goMetrics}
@@ -798,7 +798,9 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
           </button>
         </main>
 
-        <div className="mt-auto md:mx-auto md:w-full md:max-w-[760px]">
+        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 px-3 pb-[calc(0.7rem+env(safe-area-inset-bottom))] sm:px-4 md:px-8 lg:px-10">
+          <div className="mx-auto w-full max-w-[1100px]">
+            <div className="pointer-events-auto md:mx-auto md:w-full md:max-w-[760px]">
           <button
             type="button"
             onClick={goChat}
@@ -822,6 +824,8 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
               </span>
             </div>
           </button>
+            </div>
+          </div>
         </div>
       </motion.div>
 

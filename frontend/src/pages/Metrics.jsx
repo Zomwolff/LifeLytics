@@ -21,7 +21,7 @@ export default function Metrics({ user, goBack, goHome, goChat, goMetrics, goPro
 
   return (
     <div
-      className="relative min-h-screen overflow-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-4 py-6 md:px-8 lg:px-10"
+      className="relative min-h-screen overflow-x-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-3 py-4 sm:px-4 sm:py-6 md:px-8 lg:px-10"
       style={{ fontFamily: "'Sora', sans-serif" }}
     >
       <div className="pointer-events-none absolute -left-24 -top-20 h-64 w-64 rounded-full bg-[radial-gradient(circle,#71bcff_0%,rgba(113,188,255,0.32)_56%,transparent_100%)] blur-2xl" />
@@ -35,7 +35,7 @@ export default function Metrics({ user, goBack, goHome, goChat, goMetrics, goPro
       />
 
       <motion.div
-        className="relative z-10 mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-[980px] flex-col"
+        className="relative z-10 mx-auto flex min-h-[calc(100dvh-2rem)] w-full max-w-[980px] flex-col pb-[calc(6.5rem+env(safe-area-inset-bottom))] sm:min-h-[calc(100vh-3rem)]"
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
@@ -207,7 +207,9 @@ export default function Metrics({ user, goBack, goHome, goChat, goMetrics, goPro
           </section>
         </main>
 
-        <div className="mt-auto md:mx-auto md:w-full md:max-w-[760px]">
+        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 px-3 pb-[calc(0.7rem+env(safe-area-inset-bottom))] sm:px-4 md:px-8 lg:px-10">
+          <div className="mx-auto w-full max-w-[980px]">
+            <div className="pointer-events-auto md:mx-auto md:w-full md:max-w-[760px]">
           <button
             type="button"
             onClick={goChat}
@@ -229,6 +231,8 @@ export default function Metrics({ user, goBack, goHome, goChat, goMetrics, goPro
               </span>
             </div>
           </button>
+            </div>
+          </div>
         </div>
       </motion.div>
     </div>

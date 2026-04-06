@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { apiFetch } from "../api/client";
 
-function WeeklyBarChart({ title, unit, values, labels, maxValue, colorClass, target, weeklyAverage }) {
+function WeeklyBarChart({ title, unit, values, labels, maxValue, colorClass, target, weeklyAverage, valueFormatter }) {
   const fallbackLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const resolvedLabels = Array.isArray(labels) && labels.length === 7 ? labels : fallbackLabels;
+  const formatValue = typeof valueFormatter === "function" ? valueFormatter : (value) => String(value);
 
   return (
     <section className="rounded-[1.25rem] border border-white/30 bg-[rgba(255,255,255,0.62)] p-4 shadow-[0_10px_22px_rgba(31,43,64,0.14)]">
@@ -17,15 +18,26 @@ function WeeklyBarChart({ title, unit, values, labels, maxValue, colorClass, tar
         </div>
       </div>
 
-      <div className="grid h-40 grid-cols-7 items-end gap-1 rounded-xl border border-[#c8d5e6] bg-[linear-gradient(180deg,rgba(238,244,252,0.85),rgba(225,235,248,0.88))] px-2 py-3">
+      <div className="grid h-48 grid-cols-7 items-end gap-1 rounded-xl border border-[#c8d5e6] bg-[linear-gradient(180deg,rgba(238,244,252,0.85),rgba(225,235,248,0.88))] px-2 py-3">
         {values.map((value, index) => {
           const ratio = maxValue > 0 ? Math.min(Math.max(value / maxValue, 0), 1) : 0;
           const barHeight = `${Math.max(ratio * 100, 8)}%`;
+          const formattedValue = formatValue(value);
 
           return (
-            <div key={`${title}-${resolvedLabels[index]}`} className="flex h-full min-w-0 flex-col items-center justify-end gap-1">
+            <div key={`${title}-${resolvedLabels[index]}`} className="group flex h-full min-w-0 flex-col items-center justify-end gap-1">
+              <div className="pointer-events-none h-4 w-full text-center">
+                <span className="inline-block rounded-md bg-[#1f3656] px-1.5 py-0.5 text-[0.6rem] font-bold leading-none text-white opacity-0 transition-all duration-150 group-hover:-translate-y-0.5 group-hover:opacity-100">
+                  {formattedValue}
+                </span>
+              </div>
               <div className="flex h-28 w-full items-end rounded-md bg-white/55 p-[2px]">
-                <div className={`w-full rounded-sm ${colorClass}`} style={{ height: barHeight }} />
+                <motion.div
+                  className={`w-full rounded-sm ${colorClass}`}
+                  style={{ height: barHeight }}
+                  whileHover={{ scale: 1.06 }}
+                  transition={{ type: "spring", stiffness: 280, damping: 18 }}
+                />
               </div>
               <div className="w-full truncate text-center text-[0.62rem] font-semibold leading-none text-[#4e6486]">
                 {resolvedLabels[index]}
@@ -179,6 +191,7 @@ export default function Trends({ user, goBack }) {
             maxValue={10}
             colorClass="bg-[linear-gradient(180deg,#6c8dff,#4f6de3)]"
             weeklyAverage={avgSleep}
+            valueFormatter={(value) => Number(value).toFixed(1)}
           />
 
           <WeeklyBarChart
@@ -189,6 +202,7 @@ export default function Trends({ user, goBack }) {
             maxValue={12000}
             colorClass="bg-[linear-gradient(180deg,#53dcb2,#2db791)]"
             weeklyAverage={avgSteps.toLocaleString()}
+            valueFormatter={(value) => Math.round(Number(value)).toLocaleString()}
           />
 
           <WeeklyBarChart
@@ -200,6 +214,7 @@ export default function Trends({ user, goBack }) {
             colorClass="bg-[linear-gradient(180deg,#ffb17f,#f1884e)]"
             target={user?.caloriesTarget || 2000}
             weeklyAverage={avgCalories}
+            valueFormatter={(value) => Math.round(Number(value)).toLocaleString()}
           />
 
           <WeeklyBarChart
@@ -210,6 +225,7 @@ export default function Trends({ user, goBack }) {
             maxValue={Math.max(...weeklyCaloriesBurned, 1)}
             colorClass="bg-[linear-gradient(180deg,#76d6ff,#3da3e6)]"
             weeklyAverage={avgCaloriesBurned}
+            valueFormatter={(value) => Math.round(Number(value)).toLocaleString()}
           />
 
           <WeeklyBarChart
@@ -220,6 +236,7 @@ export default function Trends({ user, goBack }) {
             maxValue={180}
             colorClass="bg-[linear-gradient(180deg,#f48aa0,#d75a78)]"
             weeklyAverage={avgGlucose}
+            valueFormatter={(value) => Math.round(Number(value)).toLocaleString()}
           />
         </main>
       </motion.div>
