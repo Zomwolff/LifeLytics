@@ -352,6 +352,11 @@ async def deleteUserData(userId: str) -> bool:
         for report in reports:
             report.reference.delete()
 
+        # Delete chat history
+        chat = _user_ref(db, userId).collection("chat_history").stream()
+        for msg in chat:
+            msg.reference.delete()
+
         # Delete user document
         _user_ref(db, userId).delete()
         logger.info(f"Deleted all data for user {userId}")
@@ -420,16 +425,19 @@ async def addCollectionDoc(
         )
         return False
 
-async def saveReport(userId: str, parsed: Dict[str, Any]) -> str:
-    """Save parsed report to Firestore under reports/{reportId}."""
+async def saveReport(userId: str, parsed: Dict[str, Any]) -> Optional[str]:
+    """Save parsed report to users/{userId}/reports subcollection."""
     try:
         db = getFirestoreClient()
+        if not db:
+            return None
         reportId = parsed.get("scanId") or str(uuid.uuid4())
-        db.collection("reports").document(reportId).set({
+        _log_write(userId)
+        _user_ref(db, userId).collection("reports").document(reportId).set({
             "reportId": reportId,
             "userId": userId,
             "filename": parsed.get("filename"),
-            "uploadedAt": firestore.SERVER_TIMESTAMP,
+            "uploadedAt": datetime.now().isoformat(),
             "status": parsed.get("status", "good"),
             "summary": parsed.get("summary", ""),
             "details": parsed.get("details", ""),
@@ -445,22 +453,26 @@ async def saveReport(userId: str, parsed: Dict[str, Any]) -> str:
         return None
 
 
-async def getReports(userId: str) -> list:
-    """Get all reports for a user."""
+async def getReports(userId: str) -> List[Dict[str, Any]]:
+    """Get all reports from users/{userId}/reports subcollection."""
     try:
         db = getFirestoreClient()
-        docs = db.collection("reports").where("userId", "==", userId).stream()
+        if not db:
+            return []
+        _log_read(userId)
+        docs = _user_ref(db, userId).collection("reports").stream()
         reports = []
         for doc in docs:
             data = doc.to_dict()
-            data["reportId"] = doc.id
+            data["id"] = doc.id
             reports.append(data)
+        reports.sort(key=lambda x: x.get("uploadedAt", ""), reverse=True)
         return reports
     except Exception as e:
         logger.error(f"Failed to get reports: {e}")
         return []
     
-    async def saveChatMessage(userId: str, role: str, text: str) -> Optional[str]:
+async def saveChatMessage(userId: str, role: str, text: str) -> Optional[str]:
     """Save a single chat message to users/{userId}/chat_history."""
     try:
         db = getFirestoreClient()
