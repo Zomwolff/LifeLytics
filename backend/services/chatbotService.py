@@ -1,17 +1,6 @@
-"""Chatbot service for health-related conversations.
+"""Chatbot service with persistent history and prescription context."""
 
-Integrates with LLM for intelligent, context-aware responses.
-Includes fallback to rule-based responses if LLM is unavailable.
-
-Features:
-- Logging of chatbot interactions
-- Performance tracking
-- LLM status reporting (llm_used, model_used)
-- User context awareness
-- Fallback responses with error details
-"""
-
-from typing import Dict, Any
+from typing import Dict, Any, List
 import logging
 import json
 
@@ -23,28 +12,12 @@ logger = getLogger(__name__)
 
 
 async def respond(message: str, userId: str) -> Dict[str, Any]:
-    """Generate chatbot response based on user message and health context.
-
-    Process:
-    1. Get user health data for context
-    2. Call LLM service with message + context
-    3. Return response with LLM metadata (llm_used, model_used, status)
-
-    Args:
-        message: User's chat message
-        userId: User ID for context retrieval and logging
-
-    Returns:
-        Dict with:
-        - response: str (chatbot response)
-        - llm_used: bool
-        - model_used: str or None
-        - llm_status: "success" or other status
-    """
     with timeOperation(f"Chatbot response for user {userId}", logger) as timer:
         try:
             if _isGreetingMessage(message):
                 greeting = await _buildGreetingResponse(userId)
+                await firestore_db.saveChatMessage(userId, "user", message)
+                await firestore_db.saveChatMessage(userId, "assistant", greeting)
                 return {
                     "response": greeting,
                     "llm_used": False,
@@ -52,7 +25,6 @@ async def respond(message: str, userId: str) -> Dict[str, Any]:
                     "llm_status": "greeting",
                 }
 
-            # Get user context for health awareness from Firestore
             user_profile = await firestore_db.getUserProfile(userId) or {}
             health_logs = await firestore_db.getHealthLogs(userId)
             glucose = await firestore_db.getCollectionDocs(userId, "glucose")
@@ -68,39 +40,43 @@ async def respond(message: str, userId: str) -> Dict[str, Any]:
                 "trend_context": trend_context,
             }
 
-            # Prepare health metrics
             healthMetrics = _extractHealthMetrics(userContext)
+            prescriptionContext = _buildPrescriptionContext(reports)
+            historyContext = _buildHistoryContext(chat_history)
 
-            # Log the incoming message
             msgPreview = message[:50] + "..." if len(message) > 50 else message
-            logger.info(f"Processing chat message for user {userId}: {msgPreview}")
+            logger.info(f"Processing chat for user {userId}: {msgPreview}")
 
-            # Use LLM service (returns dict with response + metadata)
             llmService = getLLMService()
             llmResponse = await llmService.generateChatResponse(
-                message, {"metrics": healthMetrics, "context": userContext}, userId=userId
+                message,
+                {
+                    "metrics": healthMetrics,
+                    "context": userContext,
+                    "prescriptionContext": prescriptionContext,
+                    "chatHistory": historyContext,
+                },
+                userId=userId,
             )
 
-            # Log LLM usage
             if llmResponse.get("llm_used"):
-                llmLogger.info(
-                    f"Chat response from {llmResponse.get('model_used')} for user {userId}"
-                )
+                llmLogger.info(f"Chat response from {llmResponse.get('model_used')} for {userId}")
             else:
-                status = llmResponse.get("llm_status", "unknown")
-                llmLogger.warning(f"Chat fallback (LLM {status}) for user {userId}")
+                llmLogger.warning(f"Chat fallback (LLM {llmResponse.get('llm_status')}) for {userId}")
 
             responseText = _ensureChatResponse(llmResponse.get("response"), message)
             llmResponse["response"] = responseText
 
-            logger.info(f"Generated chat response for user {userId} in {timer.elapsed:.2f}s")
+            await firestore_db.saveChatMessage(userId, "assistant", responseText)
+
+            logger.info(f"Chat response for {userId} in {timer.elapsed:.2f}s")
             return llmResponse
 
         except Exception as e:
-            logger.error(f"Error generating chat response for user {userId}: {str(e)}")
-            # Return fallback with error information
+            logger.error(f"Error in chatbot for {userId}: {str(e)}")
+            fallback = _mockChatFallback(message)
             return {
-                "response": _mockChatFallback(message),
+                "response": fallback,
                 "llm_used": False,
                 "model_used": None,
                 "llm_status": "error",
@@ -108,15 +84,50 @@ async def respond(message: str, userId: str) -> Dict[str, Any]:
             }
 
 
-def _extractHealthMetrics(userContext: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract health metrics from user context for LLM awareness.
+def _buildPrescriptionContext(reports: List[Dict[str, Any]]) -> str:
+    if not reports:
+        return "No prescription or health report history available."
 
-    Args:
-        userContext: User's complete health data
+    lines = ["Recent health reports:"]
+    for i, report in enumerate(reports[:5]):
+        status = report.get("status", "unknown")
+        summary = report.get("summary", "")
+        filename = report.get("filename", f"Report {i+1}")
+        timestamp = report.get("uploadedAt", "")[:10] if report.get("uploadedAt") else ""
+        nutrients = report.get("nutrients", {})
+        markers = report.get("metabolicMarkers", report.get("metabolic_markers", {}))
+
+        lines.append(f"\n- {filename} ({timestamp}): Status={status}")
+        if summary:
+            lines.append(f"  Summary: {summary}")
+        if nutrients:
+            low = [k for k, v in nutrients.items() if str(v).lower() in ["low", "deficient"]]
+            high = [k for k, v in nutrients.items() if str(v).lower() in ["high", "elevated", "excess"]]
+            if low:
+                lines.append(f"  Low nutrients: {', '.join(low)}")
+            if high:
+                lines.append(f"  High nutrients: {', '.join(high)}")
+        if markers:
+            abnormal = [k for k, v in markers.items() if str(v).lower() != "normal"]
+            if abnormal:
+                lines.append(f"  Abnormal markers: {', '.join(abnormal)}")
+
+    return "\n".join(lines)
+
+
+def _buildHistoryContext(chat_history: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    messages = []
+    for msg in chat_history:
+        role = msg.get("role", "user")
+        text = msg.get("text", "")
+        if role in ("user", "assistant") and text:
+            messages.append({"role": role, "content": text})
+    return messages
+
 
     Returns:
         Formatted metrics dictionary
-    """
+    
     height_cm = _to_number(userContext.get("heightCm"), 0)
     height = _to_number(userContext.get("height"), 0)
     if height_cm > 0:
@@ -250,64 +261,40 @@ def _average(values: list[float]) -> float:
 
 
 def _mockChatFallback(message: str) -> str:
-    """Provide mock fallback response for chat.
-    
-    Args:
-        message: User's message
-        
-    Returns:
-        Generic fallback response
-    """
     keyword = message.lower()
-    if "neck" in keyword or "neck pain" in keyword or "stiff neck" in keyword:
-        return (
-            "Neck pain is often caused by posture, muscle strain, or sleeping position. "
-            "Try gentle neck stretches, keep your screen at eye level, and avoid sudden twisting. "
-            "If you have numbness, weakness, severe pain, fever, or pain after an injury, please see a doctor promptly."
-        )
+    if "neck" in keyword:
+        return "Neck pain is often caused by posture or muscle strain. Try gentle stretches and keep your screen at eye level. See a doctor if you have numbness or severe pain."
     if "bmi" in keyword:
-        return "You can check your BMI at the /health/bmi endpoint. BMI helps assess if you're at a healthy weight for your height."
-    elif "glucose" in keyword or "blood sugar" in keyword:
-        return "Glucose monitoring is important for managing diabetes risk. Regular readings help identify patterns and trends."
-    elif "exercise" in keyword or "workout" in keyword:
-        return "Regular exercise is crucial for overall health. Aim for at least 150 minutes of moderate activity per week."
-    elif "nutrition" in keyword or "diet" in keyword:
+        return "BMI helps assess if you're at a healthy weight for your height."
+    if "glucose" in keyword or "blood sugar" in keyword:
+        return "Glucose monitoring is important for managing diabetes risk."
+    if "exercise" in keyword or "workout" in keyword:
+        return "Aim for at least 150 minutes of moderate activity per week."
+    if "nutrition" in keyword or "diet" in keyword:
         return "A balanced diet with fruits, vegetables, whole grains, and lean proteins supports optimal health."
-    else:
-        return (
-            "I can help with health-related questions. Try asking about BMI, glucose, exercise, nutrition, or symptoms like neck pain. "
-            "If you describe the problem, I can suggest safe next steps and when to seek medical care."
-        )
+    return "I can help with health-related questions about BMI, glucose, exercise, nutrition, or your reports."
 
 
 def _isGreetingMessage(message: str) -> bool:
-    """Detect simple greeting messages that should get a greeting back."""
+    import re
     normalized = " ".join(message.lower().strip().split())
     if not normalized:
         return False
-
-    greeting_patterns = [
+    patterns = [
         r"^(hi|hello|hey|hii|yo|hola|namaste|good morning|good afternoon|good evening)( there)?[!.?]*$",
         r"^(hi|hello|hey|hii|yo|hola|namaste|good morning|good afternoon|good evening)[,.!\s]*$",
         r"^(hi|hello|hey)[\s,!.?]*life(lytics)?[\s,!.?]*$",
     ]
-
-    import re
-
-    return any(re.match(pattern, normalized) for pattern in greeting_patterns)
+    return any(re.match(p, normalized) for p in patterns)
 
 
 async def _buildGreetingResponse(userId: str) -> str:
-    """Build a simple greeting response."""
     session = await firestore_db.getUserProfile(userId) or {}
     name = session.get("name")
-    if name:
-        return f"Hi {name}, how can I help you today?"
-    return "Hi, how can I help you today?"
+    return f"Hi {name}, how can I help you today?" if name else "Hi, how can I help you today?"
 
 
 def _ensureChatResponse(response: Any, message: str) -> str:
-    """Normalize chatbot output and guarantee a useful fallback."""
     if isinstance(response, str):
         cleaned = response.strip()
         if cleaned.startswith("```"):
@@ -328,6 +315,4 @@ def _ensureChatResponse(response: Any, message: str) -> str:
 
         if cleaned:
             return cleaned
-
     return _mockChatFallback(message)
-

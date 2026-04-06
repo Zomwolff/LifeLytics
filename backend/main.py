@@ -37,9 +37,11 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import os
 
-from backend.routes import health, insights, upload, chatbot, test, nutrition
+from backend.routes import health, insights, upload, chatbot, test, nutrition, users
 from backend.utils.firebase import initializeFirebase
 from backend.utils.logger import getLogger, logger as backendLogger
+
+
 
 # Get logger instance
 logger = getLogger(__name__)
@@ -97,6 +99,7 @@ app.include_router(nutrition.router, prefix="/nutrition", tags=["Nutrition Analy
 app.include_router(upload.router, prefix="/upload", tags=["Document Upload"])
 app.include_router(chatbot.router, prefix="/chatbot", tags=["AI Chat"])
 app.include_router(test.router, prefix="/test", tags=["Data Simulation & Testing"])
+app.include_router(users.router, prefix="/users", tags=["User Profile"])
 
 
 @app.get("/")

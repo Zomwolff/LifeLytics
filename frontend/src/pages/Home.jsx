@@ -365,8 +365,15 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
     try {
       const form = new FormData();
       form.append("file", selectedPrescriptionFile);
+
+      const { auth } = await import("../firebase");
+      const token = auth.currentUser ? await auth.currentUser.getIdToken() : null;
+
       const res = await fetch(`${import.meta.env.VITE_API_URL || ""}/upload/report`, {
         method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: form,
       });
       if (!res.ok) throw new Error(`${res.status}`);

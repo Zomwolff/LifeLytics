@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from "react";
 import Startup from "./pages/Startup";
 import Login from "./pages/Login";
@@ -21,51 +20,27 @@ function hasMetrics(user) {
 }
 
 function getSavedPage() {
-  try {
-    return sessionStorage.getItem(PAGE_KEY);
-  } catch {
-    return null;
-  }
+  try { return sessionStorage.getItem(PAGE_KEY); } catch { return null; }
 }
 
 function setSavedPage(page) {
-  try {
-    sessionStorage.setItem(PAGE_KEY, page);
-  } catch {
-    // no-op
-  }
+  try { sessionStorage.setItem(PAGE_KEY, page); } catch { /* no-op */ }
 }
 
 function clearSavedPage() {
-  try {
-    sessionStorage.removeItem(PAGE_KEY);
-  } catch {
-    // no-op
-  }
+  try { sessionStorage.removeItem(PAGE_KEY); } catch { /* no-op */ }
 }
 
 function getSavedChatReturnPage() {
-  try {
-    return sessionStorage.getItem(CHAT_RETURN_PAGE_KEY) || "home";
-  } catch {
-    return "home";
-  }
+  try { return sessionStorage.getItem(CHAT_RETURN_PAGE_KEY) || "home"; } catch { return "home"; }
 }
 
 function setSavedChatReturnPage(page) {
-  try {
-    sessionStorage.setItem(CHAT_RETURN_PAGE_KEY, page);
-  } catch {
-    // no-op
-  }
+  try { sessionStorage.setItem(CHAT_RETURN_PAGE_KEY, page); } catch { /* no-op */ }
 }
 
 function clearSavedChatReturnPage() {
-  try {
-    sessionStorage.removeItem(CHAT_RETURN_PAGE_KEY);
-  } catch {
-    // no-op
-  }
+  try { sessionStorage.removeItem(CHAT_RETURN_PAGE_KEY); } catch { /* no-op */ }
 }
 
 function isPublicPage(page) {
@@ -83,16 +58,7 @@ function pathToPage(path) {
 
 export default function App() {
   const [page, setPageState] = useState(() => {
-    const sessionUser = getSessionUser();
     const savedPage = getSavedPage();
-
-    if (sessionUser) {
-      if (savedPage && !isPublicPage(savedPage)) {
-        return savedPage;
-      }
-      return hasMetrics(sessionUser) ? "home" : "setup-metrics";
-    }
-
     return savedPage && isPublicPage(savedPage) ? savedPage : "startup";
   });
   const [user, setUser] = useState(null);
@@ -129,36 +95,31 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const sessionUser = getSessionUser();
-    if (sessionUser) {
-      setUser(sessionUser);
-      setPage((currentPage) => {
+    // getSessionUser is now async — Firebase checks auth state
+    getSessionUser().then((sessionUser) => {
+      if (sessionUser) {
+        setUser(sessionUser);
         const savedPage = getSavedPage();
-        if (savedPage && !isPublicPage(savedPage)) {
-          if (hasMetrics(sessionUser) || savedPage === "setup-metrics") {
-            return savedPage;
+        setPage(() => {
+          if (savedPage && !isPublicPage(savedPage)) {
+            if (hasMetrics(sessionUser) || savedPage === "setup-metrics") return savedPage;
+            return "setup-metrics";
           }
-          return "setup-metrics";
-        }
-
-        return hasMetrics(sessionUser) ? currentPage : "setup-metrics";
-      });
-    }
+          return hasMetrics(sessionUser) ? "home" : "setup-metrics";
+        });
+      }
+    });
 
     const unsubscribe = subscribeToAuthChanges((nextUser) => {
       if (nextUser) {
         setUser(nextUser);
         setPage((currentPage) => {
-          // Only auto-route on auth boundaries or required onboarding transitions.
           if (currentPage === "startup" || currentPage === "login" || currentPage === "signup") {
             return hasMetrics(nextUser) ? "home" : "setup-metrics";
           }
-
           if (currentPage === "setup-metrics" && hasMetrics(nextUser)) {
             return "home";
           }
-
-          // Keep user on current page (e.g. profile) after saving edits.
           return currentPage;
         });
       } else {
@@ -189,11 +150,7 @@ export default function App() {
   }
 
   async function handleSaveMetrics(payload) {
-    if (!user?.id) {
-      return { ok: false, error: "Session not found. Please login again." };
-    }
-
-    const result = await saveUserMetrics({ userId: user.id, ...payload });
+    const result = await saveUserMetrics(payload);
     if (result.ok) {
       setUser(result.user);
       setPage("home");
@@ -202,19 +159,15 @@ export default function App() {
   }
 
   async function handleSaveProfileField({ field, value }) {
-    if (!user?.id) {
-      return { ok: false, error: "Session not found. Please login again." };
-    }
-
-    const result = await updateUserProfileField({ userId: user.id, field, value });
+    const result = await updateUserProfileField({ field, value });
     if (result.ok) {
       setUser(result.user);
     }
     return result;
   }
 
-  function handleLogout() {
-    logoutUser();
+  async function handleLogout() {
+    await logoutUser();
     setUser(null);
     clearSavedPage();
     clearSavedChatReturnPage();
