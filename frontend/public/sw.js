@@ -1,5 +1,5 @@
-const CACHE_NAME = "lifelytics-pwa-v1";
-const PRECACHE_URLS = ["/", "/index.html", "/manifest.json", "/pwa-icon.svg", "/images/welcome.png"];
+const CACHE_NAME = "lifelytics-pwa-v2";
+const PRECACHE_URLS = ["/", "/index.html", "/manifest.json", "/pwa-icon.svg", "/icons/icon-192.png", "/icons/icon-512.png", "/images/welcome.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
