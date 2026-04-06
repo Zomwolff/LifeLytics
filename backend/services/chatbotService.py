@@ -56,11 +56,15 @@ async def respond(message: str, userId: str) -> Dict[str, Any]:
             health_logs = await firestore_db.getHealthLogs(userId)
             glucose = await firestore_db.getCollectionDocs(userId, "glucose")
             smartwatch = await firestore_db.getCollectionDocs(userId, "smartwatch")
+            meals = await firestore_db.getCollectionDocs(userId, "meals")
+            trend_context = await firestore_db.getLatestTrendContext(userId) or {}
             userContext = {
                 **user_profile,
                 "health_logs": health_logs,
                 "glucose": glucose,
                 "smartwatch": smartwatch,
+                "meals": meals,
+                "trend_context": trend_context,
             }
 
             # Prepare health metrics
@@ -112,22 +116,136 @@ def _extractHealthMetrics(userContext: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Formatted metrics dictionary
     """
-    height = userContext.get("height", 0)
-    weight = userContext.get("weight", 0)
-    bmi = None
-    if height and weight and height > 0:
-        bmi = round(weight / (height * height), 1)
+    height_cm = _to_number(userContext.get("heightCm"), 0)
+    height = _to_number(userContext.get("height"), 0)
+    if height_cm > 0:
+        height = round(height_cm / 100.0, 4)
+
+    weight = _to_number(userContext.get("weightKg"), 0)
+    if weight <= 0:
+        weight = _to_number(userContext.get("weight"), 0)
+
+    bmi = round(weight / (height * height), 1) if height > 0 and weight > 0 else None
+
+    trend_context = userContext.get("trend_context") or {}
+
+    trend_sleep = _numeric_series(trend_context.get("sleep") or trend_context.get("weeklySleep"))
+    trend_steps = _numeric_series(trend_context.get("steps") or trend_context.get("weeklySteps"))
+    trend_glucose = _numeric_series(trend_context.get("glucose") or trend_context.get("weeklyBloodGlucose"))
+    trend_heart = _numeric_series(trend_context.get("heart_rate") or trend_context.get("weeklyHeartRate"))
+
+    smartwatch = userContext.get("smartwatch") or []
+    health_logs = userContext.get("health_logs") or []
+    glucose_rows = userContext.get("glucose") or []
+
+    sleep_values = [
+        max(
+            _to_number(row.get("sleepDuration"), 0),
+            _to_number(row.get("sleep"), 0),
+        )
+        for row in [*smartwatch, *health_logs]
+        if max(_to_number(row.get("sleepDuration"), 0), _to_number(row.get("sleep"), 0)) > 0
+    ] or trend_sleep
+
+    steps_values = [
+        max(
+            _to_number(row.get("steps"), 0),
+            _to_number(row.get("stepCount"), 0),
+        )
+        for row in [*smartwatch, *health_logs]
+        if max(_to_number(row.get("steps"), 0), _to_number(row.get("stepCount"), 0)) > 0
+    ] or trend_steps
+
+    glucose_values = [
+        value
+        for value in [
+            *[
+                _pick_first_number(row, ["glucoseLevel", "value", "glucose"])
+                for row in glucose_rows
+            ],
+            *[
+                _pick_first_number(row, ["glucose", "glucoseLevel", "value"])
+                for row in health_logs
+            ],
+        ]
+        if value > 0
+    ] or trend_glucose
+
+    heart_rate_values = [
+        value
+        for value in [
+            *[_pick_first_number(row, ["heartRate", "avgHeartRate"]) for row in smartwatch],
+            *[_pick_first_number(row, ["heartRate", "avgHeartRate"]) for row in health_logs],
+        ]
+        if value > 0
+    ] or trend_heart
+
+    meals = userContext.get("meals") or []
+    calories_values = [
+        _pick_first_number(row, ["calories"]) for row in meals
+    ]
+    calories_values = [value for value in calories_values if value > 0]
 
     return {
         "height": height,
         "weight": weight,
         "bmi": bmi,
-        "avgSleep": 0,
-        "avgSteps": 0,
-        "avgGlucose": 0,
-        "avgHeartRate": 0,
-        "dataPoints": len(userContext.get("health_logs", [])),
+        "avgSleep": _average(sleep_values),
+        "avgSteps": int(round(_average(steps_values))) if steps_values else 0,
+        "avgGlucose": _average(glucose_values),
+        "avgHeartRate": _average(heart_rate_values),
+        "avgCaloriesIntake": _average(calories_values),
+        "dataPoints": len(health_logs) + len(glucose_rows) + len(smartwatch) + len(meals),
     }
+
+
+def _to_number(value: Any, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return default
+        parsed = []
+        chunk = ""
+        for char in text:
+            if char.isdigit() or char == ".":
+                chunk += char
+            elif chunk:
+                break
+        if chunk:
+            try:
+                return float(chunk)
+            except ValueError:
+                return default
+    return default
+
+
+def _pick_first_number(row: Dict[str, Any], keys: list[str], default: float = 0.0) -> float:
+    for key in keys:
+        value = _to_number(row.get(key), 0.0)
+        if value > 0:
+            return value
+    return default
+
+
+def _numeric_series(values: Any) -> list[float]:
+    if not isinstance(values, list):
+        return []
+    output: list[float] = []
+    for value in values:
+        parsed = _to_number(value, 0.0)
+        if parsed > 0:
+            output.append(parsed)
+    return output
+
+
+def _average(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    return round(sum(values) / len(values), 2)
 
 
 def _mockChatFallback(message: str) -> str:

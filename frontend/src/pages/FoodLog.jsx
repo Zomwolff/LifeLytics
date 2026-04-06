@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { apiFetch } from "../api/client";
 
 function getIndiaDateString() {
@@ -12,13 +12,51 @@ function getIndiaDateString() {
 
 export default function FoodLog({ user, goBack }) {
   const [selectedDate, setSelectedDate] = useState(getIndiaDateString());
-  const [mealDraft, setMealDraft] = useState("");
   const [foodLogRows, setFoodLogRows] = useState([]);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisError, setAnalysisError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState("");
+  const [isDetectingFromPhoto, setIsDetectingFromPhoto] = useState(false);
+  const [photoCandidates, setPhotoCandidates] = useState([]);
+  const [selectedCandidate, setSelectedCandidate] = useState("");
+  const [manualFoodName, setManualFoodName] = useState("");
+  const [servingGrams, setServingGrams] = useState("100");
+  const [photoError, setPhotoError] = useState("");
+  const [isResolvingPhotoMeal, setIsResolvingPhotoMeal] = useState(false);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+  const uploadInputRef = useRef(null);
+  const videoRef = useRef(null);
+  const captureCanvasRef = useRef(null);
+  const cameraStreamRef = useRef(null);
   const todayDate = getIndiaDateString();
   const isViewingToday = selectedDate === todayDate;
+
+  useEffect(() => {
+    return () => {
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+        cameraStreamRef.current = null;
+      }
+      if (photoPreview) {
+        URL.revokeObjectURL(photoPreview);
+      }
+    };
+  }, [photoPreview]);
+
+  useEffect(() => {
+    if (!isCameraActive || !videoRef.current || !cameraStreamRef.current) {
+      return;
+    }
+
+    const video = videoRef.current;
+    video.srcObject = cameraStreamRef.current;
+    const playPromise = video.play();
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch(() => {
+        setCameraError("Camera started, but preview could not autoplay. Tap Use Camera again.");
+      });
+    }
+  }, [isCameraActive]);
 
   function calculateTotals(items) {
     let totalCalories = 0;
@@ -60,70 +98,214 @@ export default function FoodLog({ user, goBack }) {
     };
   }
 
-  async function handleMealSubmit(event) {
-    event.preventDefault();
+  function buildMealFromNutrition(nutrition) {
+    const now = new Date();
+    const timestamp = now.toISOString();
+
+    return {
+      name: nutrition.name,
+      servingSize: nutrition.servingSize,
+      calories: nutrition.calories,
+      protein: nutrition.protein,
+      totalFat: nutrition.totalFat,
+      saturatedFat: nutrition.saturatedFat,
+      cholesterol: nutrition.cholesterol,
+      sodium: nutrition.sodium,
+      carbohydrates: nutrition.carbohydrates,
+      fiber: nutrition.fiber,
+      sugars: nutrition.sugars,
+      date: todayDate,
+      timestamp,
+    };
+  }
+
+  async function saveMealRow(newFood) {
+    // Save to Firestore
+    if (user?.id) {
+      setIsSaving(true);
+      try {
+        await apiFetch("/nutrition/save-meal", {
+          method: "POST",
+          body: JSON.stringify({
+            userId: user.id,
+            date: todayDate,
+            meal: newFood,
+          }),
+        });
+      } catch (err) {
+        console.warn("Could not save to database:", err);
+      } finally {
+        setIsSaving(false);
+      }
+    }
+
+    setFoodLogRows((prev) => [...prev, newFood]);
+  }
+
+  async function processPhotoFile(file) {
+    if (!file) return;
 
     if (!isViewingToday) {
-      setAnalysisError("You can only add meals for today. Switch View Date to today to log food.");
+      setPhotoError("You can only add meals for today. Switch View Date to today to log food.");
       return;
     }
 
-    const nextMeal = mealDraft.trim();
-    if (!nextMeal) return;
+    if (photoPreview) {
+      URL.revokeObjectURL(photoPreview);
+    }
+    setPhotoPreview(URL.createObjectURL(file));
+    setPhotoCandidates([]);
+    setSelectedCandidate("");
+    setManualFoodName("");
+    setPhotoError("");
+    setCameraError("");
 
-    setIsAnalyzing(true);
-    setAnalysisError("");
-
+    setIsDetectingFromPhoto(true);
     try {
-      const response = await apiFetch("/nutrition/analyze", {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await apiFetch("/nutrition/image-detect", {
         method: "POST",
-        body: JSON.stringify({ description: nextMeal }),
+        body: formData,
       });
 
-      const now = new Date();
-      const timestamp = now.toISOString();
-
-      const newFood = {
-        name: response.name,
-        servingSize: response.servingSize,
-        calories: response.calories,
-        protein: response.protein,
-        totalFat: response.totalFat,
-        saturatedFat: response.saturatedFat,
-        cholesterol: response.cholesterol,
-        sodium: response.sodium,
-        carbohydrates: response.carbohydrates,
-        fiber: response.fiber,
-        sugars: response.sugars,
-        date: todayDate,
-        timestamp: timestamp,
-      };
-
-      // Save to Firestore
-      if (user?.id) {
-        setIsSaving(true);
-        try {
-          await apiFetch("/nutrition/save-meal", {
-            method: "POST",
-            body: JSON.stringify({
-              userId: user.id,
-              date: todayDate,
-              meal: newFood,
-            }),
-          });
-        } catch (err) {
-          console.warn("Could not save to database:", err);
-        } finally {
-          setIsSaving(false);
-        }
+      const candidates = Array.isArray(response.candidates) ? response.candidates : [];
+      setPhotoCandidates(candidates);
+      if (candidates.length > 0) {
+        setSelectedCandidate(candidates[0].name);
       }
-
-      setFoodLogRows((prev) => [...prev, newFood]);
-      setMealDraft("");
     } catch {
-      setAnalysisError("Unable to analyze food. Please try again.");
+      setPhotoError("Could not detect food from image. Please type the name manually.");
     } finally {
-      setIsAnalyzing(false);
+      setIsDetectingFromPhoto(false);
+    }
+  }
+
+  async function handlePhotoSelect(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    await processPhotoFile(file);
+    event.target.value = "";
+  }
+
+  function stopCamera() {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setIsCameraActive(false);
+  }
+
+  async function startCamera() {
+    setCameraError("");
+
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      setCameraError("Camera access is not supported in this browser.");
+      return;
+    }
+
+    try {
+      stopCamera();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 640 },
+          height: { ideal: 360 },
+        },
+        audio: false,
+      });
+
+      cameraStreamRef.current = stream;
+      setIsCameraActive(true);
+    } catch {
+      setCameraError("Camera permission denied or unavailable. Please allow camera access.");
+      stopCamera();
+    }
+  }
+
+  async function captureFromCamera() {
+    if (!videoRef.current || !captureCanvasRef.current) {
+      setCameraError("Camera is not ready yet.");
+      return;
+    }
+
+    const video = videoRef.current;
+    const canvas = captureCanvasRef.current;
+    const width = video.videoWidth || 640;
+    const height = video.videoHeight || 360;
+    canvas.width = width;
+    canvas.height = height;
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      setCameraError("Unable to capture image from camera.");
+      return;
+    }
+
+    context.drawImage(video, 0, 0, width, height);
+    const blob = await new Promise((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", 0.92);
+    });
+
+    if (!blob) {
+      setCameraError("Unable to capture image from camera.");
+      return;
+    }
+
+    const file = new File([blob], `meal-${Date.now()}.jpg`, { type: "image/jpeg" });
+    await processPhotoFile(file);
+    stopCamera();
+  }
+
+  async function handleConfirmPhotoMeal() {
+    if (!isViewingToday) {
+      setPhotoError("You can only add meals for today.");
+      return;
+    }
+
+    const confirmedName = (manualFoodName || selectedCandidate || "").trim();
+    if (!confirmedName) {
+      setPhotoError("Select a detected food or type the food name.");
+      return;
+    }
+
+    const grams = Number(servingGrams);
+    if (!Number.isFinite(grams) || grams <= 0) {
+      setPhotoError("Please enter a valid serving size in grams.");
+      return;
+    }
+
+    setPhotoError("");
+    setIsResolvingPhotoMeal(true);
+    try {
+      const response = await apiFetch("/nutrition/image-confirm", {
+        method: "POST",
+        body: JSON.stringify({
+          foodName: confirmedName,
+          servingGrams: grams,
+        }),
+      });
+
+      const nutrition = response.nutrition || {};
+      const newFood = buildMealFromNutrition(nutrition);
+      await saveMealRow(newFood);
+
+      setPhotoCandidates([]);
+      setSelectedCandidate("");
+      setManualFoodName("");
+      setServingGrams("100");
+      if (photoPreview) {
+        URL.revokeObjectURL(photoPreview);
+      }
+      setPhotoPreview("");
+    } catch {
+      setPhotoError("Could not resolve nutrition from this photo right now.");
+    } finally {
+      setIsResolvingPhotoMeal(false);
     }
   }
 
@@ -155,7 +337,7 @@ export default function FoodLog({ user, goBack }) {
 
   return (
     <div
-      className="relative min-h-screen overflow-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-4 py-6 md:px-8 lg:px-10"
+      className="relative min-h-screen overflow-x-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-6 md:px-8 lg:px-10"
       style={{ fontFamily: "'Sora', sans-serif" }}
     >
       <div className="mx-auto w-full max-w-[1120px]">
@@ -186,10 +368,10 @@ export default function FoodLog({ user, goBack }) {
             </div>
           </div>
 
-          <form onSubmit={handleMealSubmit} className="mt-4 rounded-[1.2rem] border border-[#d2dcec] bg-white/90 p-3 shadow-[0_8px_18px_rgba(31,43,64,0.06)]">
+          <form className="mt-4 rounded-[1.2rem] border border-[#d2dcec] bg-white/90 p-3 shadow-[0_8px_18px_rgba(31,43,64,0.06)]">
             <p className="text-[0.68rem] font-semibold uppercase tracking-[0.22em] text-[#58739a]">Add Meal</p>
             
-            <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-end md:gap-2">
+            <div className="mt-3 flex flex-col gap-3 md:w-40">
               <div className="flex flex-col gap-1 md:w-40">
                 <label className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#58739a]">View Date</label>
                 <input
@@ -199,32 +381,111 @@ export default function FoodLog({ user, goBack }) {
                   className="h-14 rounded-[1rem] border border-[#c7d3e3] bg-white px-4 text-[1rem] text-[#20314a] outline-none placeholder:text-[#7a8da8] focus:border-[#8aa2c0]"
                 />
               </div>
-
-              <input
-                value={mealDraft}
-                onChange={(event) => setMealDraft(event.target.value)}
-                placeholder="Example: Paneer sandwich 250g"
-                className="h-14 flex-1 rounded-[1rem] border border-[#c7d3e3] bg-white px-4 text-[1rem] text-[#20314a] outline-none placeholder:text-[#7a8da8] focus:border-[#8aa2c0]"
-              />
-              <button
-                type="submit"
-                disabled={isAnalyzing || isSaving || !isViewingToday}
-                className="h-14 shrink-0 rounded-[1rem] bg-[linear-gradient(145deg,#294c78,#2b5c92)] px-5 text-[1rem] font-bold text-white shadow-[0_10px_20px_rgba(41,76,120,0.22)] disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {isAnalyzing || isSaving ? "Saving..." : "Enter Next Meal"}
-              </button>
             </div>
+
+            <div className="mt-4 rounded-[0.95rem] border border-[#d2dcec] bg-[#f9fbff] p-3">
+              <p className="text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[#58739a]">From Food Photo</p>
+              <div className="mt-2 flex flex-col gap-2 md:flex-row md:items-center">
+                <label className="inline-flex h-12 cursor-pointer items-center justify-center rounded-[0.9rem] border border-[#9db0c9] bg-white px-4 text-sm font-semibold text-[#29405e] shadow-sm">
+                  Upload From Gallery
+                  <input ref={uploadInputRef} type="file" accept="image/*" onChange={handlePhotoSelect} className="hidden" />
+                </label>
+                <button
+                  type="button"
+                  onClick={startCamera}
+                  className="inline-flex h-12 items-center justify-center rounded-[0.9rem] border border-[#9db0c9] bg-white px-4 text-sm font-semibold text-[#29405e] shadow-sm"
+                >
+                  Use Camera
+                </button>
+                <input
+                  value={manualFoodName}
+                  onChange={(event) => setManualFoodName(event.target.value)}
+                  placeholder="If needed, type food name"
+                  className="h-12 flex-1 rounded-[0.9rem] border border-[#c7d3e3] bg-white px-3 text-[0.95rem] text-[#20314a] outline-none placeholder:text-[#7a8da8]"
+                />
+                <input
+                  type="number"
+                  min="1"
+                  value={servingGrams}
+                  onChange={(event) => setServingGrams(event.target.value)}
+                  className="h-12 w-full rounded-[0.9rem] border border-[#c7d3e3] bg-white px-3 text-[0.95rem] text-[#20314a] outline-none md:w-28"
+                />
+                <button
+                  type="button"
+                  onClick={handleConfirmPhotoMeal}
+                  disabled={isDetectingFromPhoto || isResolvingPhotoMeal || isSaving || !isViewingToday}
+                  className="h-12 shrink-0 rounded-[0.9rem] bg-[linear-gradient(145deg,#1f4d3f,#1b6a56)] px-4 text-sm font-bold text-white shadow-[0_10px_20px_rgba(27,106,86,0.2)] disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {isDetectingFromPhoto ? "Detecting..." : isResolvingPhotoMeal ? "Adding..." : "Confirm & Add"}
+                </button>
+              </div>
+
+              {isCameraActive ? (
+                <div className="mt-3 rounded-xl border border-[#bccbdd] bg-white/80 p-2">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#4e6486]">Camera Preview</p>
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="h-36 w-full rounded-lg border border-[#d1dbeb] bg-[#0f1a2a] object-cover"
+                  />
+                  <canvas ref={captureCanvasRef} className="hidden" />
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={captureFromCamera}
+                      className="rounded-lg border border-[#2d4e76] bg-[linear-gradient(145deg,#2b5587,#2a4d7b)] px-2 py-2 text-xs font-semibold text-white"
+                    >
+                      Capture
+                    </button>
+                    <button
+                      type="button"
+                      onClick={stopCamera}
+                      className="rounded-lg border border-[#a9bbd3] bg-white px-2 py-2 text-xs font-semibold text-[#29405e]"
+                    >
+                      Stop Camera
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {photoPreview ? (
+                <div className="mt-3">
+                  <img src={photoPreview} alt="Selected meal" className="h-32 w-32 rounded-lg border border-[#c7d3e3] object-cover" />
+                </div>
+              ) : null}
+
+              {photoCandidates.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {photoCandidates.map((candidate) => (
+                    <button
+                      key={candidate.name}
+                      type="button"
+                      onClick={() => setSelectedCandidate(candidate.name)}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold ${selectedCandidate === candidate.name ? "border-[#2f5f96] bg-[#e8f0fb] text-[#1c3c60]" : "border-[#c6d2e2] bg-white text-[#4a607f]"}`}
+                    >
+                      {candidate.name} ({Math.round((candidate.confidence || 0) * 100)}%)
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {cameraError ? <p className="mt-2 text-sm font-semibold text-[#8f2b2b]">{cameraError}</p> : null}
+              {photoError ? <p className="mt-2 text-sm font-semibold text-[#8f2b2b]">{photoError}</p> : null}
+            </div>
+
             <div className="mt-3 rounded-[0.9rem] border border-[#dbe4f0] bg-[#f7fafe] px-3 py-2 text-sm font-semibold text-[#4e6486]">
-              {analysisError ? (
-                <p className="text-[#8f2b2b]">{analysisError}</p>
-              ) : isAnalyzing || isSaving ? (
-                <p>Analyzing and saving...</p>
+              {photoError ? (
+                <p className="text-[#8f2b2b]">{photoError}</p>
+              ) : isDetectingFromPhoto || isResolvingPhotoMeal || isSaving ? (
+                <p>Detecting and saving...</p>
               ) : !isViewingToday ? (
                 <p>Viewing logs for {selectedDate}. You can only add meals for today ({todayDate}).</p>
               ) : foodLogRows.length > 0 ? (
                 <p>{foodLogRows.length} item{foodLogRows.length !== 1 ? "s" : ""} logged for {selectedDate}</p>
               ) : (
-                `Enter a food item with portion size to see nutritional values for ${selectedDate}`
+                `Upload food photo, confirm the item, and add nutrition for ${selectedDate}`
               )}
             </div>
           </form>

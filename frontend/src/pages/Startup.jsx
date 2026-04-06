@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 export default function Startup({ goLogin, goSignup }) {
   return (
     <div
-      className="relative min-h-screen overflow-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-3 py-4 sm:px-4 sm:py-6 md:px-8 lg:px-10"
+      className="relative min-h-screen overflow-x-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-4 sm:py-6 md:px-8 lg:px-10"
       style={{ fontFamily: "'Sora', sans-serif" }}
     >
       <div className="pointer-events-none absolute -left-24 -top-20 h-64 w-64 rounded-full bg-[radial-gradient(circle,#71bcff_0%,rgba(113,188,255,0.32)_56%,transparent_100%)] blur-2xl" />
