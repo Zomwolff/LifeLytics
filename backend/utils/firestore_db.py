@@ -4,6 +4,8 @@ Provides async wrappers around Firestore operations for users, health logs,
 insights, reports, and related collections.
 """
 
+import uuid
+from firebase_admin import firestore
 import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional
@@ -459,3 +461,43 @@ async def addCollectionDoc(
             f"Error adding document to collection {collectionName} for {userId}: {str(e)}"
         )
         return False
+
+async def saveReport(userId: str, parsed: Dict[str, Any]) -> str:
+    """Save parsed report to Firestore under reports/{reportId}."""
+    try:
+        db = getFirestoreClient()
+        reportId = parsed.get("scanId") or str(uuid.uuid4())
+        db.collection("reports").document(reportId).set({
+            "reportId": reportId,
+            "userId": userId,
+            "filename": parsed.get("filename"),
+            "uploadedAt": firestore.SERVER_TIMESTAMP,
+            "status": parsed.get("status", "good"),
+            "summary": parsed.get("summary", ""),
+            "details": parsed.get("details", ""),
+            "nextCheckIn": parsed.get("nextCheckIn"),
+            "nutrients": parsed.get("nutrients", {}),
+            "metabolicMarkers": parsed.get("metabolic_markers", {}),
+            "followUpHistory": [],
+        })
+        logger.info(f"Saved report {reportId} for user {userId}")
+        return reportId
+    except Exception as e:
+        logger.error(f"Failed to save report: {e}")
+        return None
+
+
+async def getReports(userId: str) -> list:
+    """Get all reports for a user."""
+    try:
+        db = getFirestoreClient()
+        docs = db.collection("reports").where("userId", "==", userId).stream()
+        reports = []
+        for doc in docs:
+            data = doc.to_dict()
+            data["reportId"] = doc.id
+            reports.append(data)
+        return reports
+    except Exception as e:
+        logger.error(f"Failed to get reports: {e}")
+        return []

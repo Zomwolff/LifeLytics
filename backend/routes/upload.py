@@ -60,17 +60,11 @@ async def getReports(userId: str = Depends(auth.getCurrentUserDependency)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @router.post("/follow-up", status_code=200)
 async def getFollowUp(
     payload: FollowUpRequest,
     userId: str = Depends(auth.getCurrentUserDependency),
 ):
-    """Get follow-up guidance based on current report status.
-
-    Recommends next steps and actions to improve health markers.
-    Takes into account previous follow-up history to avoid repetition.
-    """
     try:
         currentStatus = payload.currentStatus.lower()
         followUpHistory = payload.followUpHistory or []
@@ -96,31 +90,35 @@ async def getFollowUp(
                 "Stay consistent with exercise and balanced nutrition.",
             ]
 
-        # Pick a suggestion not already in history
-        nextSuggestion = None
-        for sugg in suggestions:
-            if sugg not in followUpHistory:
-                nextSuggestion = sugg
-                break
+        nextSuggestion = next(
+            (s for s in suggestions if s not in followUpHistory),
+            "Continue monitoring your health. Schedule a follow-up in 4 weeks."
+        )
 
-        if not nextSuggestion:
-            nextSuggestion = "Continue monitoring your health. Schedule a follow-up consultation in 4 weeks."
-
-        # Determine if status is improving
         updatedStatus = currentStatus
         if currentStatus == "deficiency" and len(followUpHistory) >= 2:
             updatedStatus = "normal"
-            summary = "Your follow-up guidance shows good progress. Continue supplementation and dietary adjustments."
+            summary = "Good progress. Continue supplementation and dietary adjustments."
         else:
             summary = "Follow-up plan created based on your current health status."
+
+        # Persist follow-up to Firestore if scanId provided
+        if payload.scanId:
+            try:
+                db = firestore_db.getFirestoreClient()
+                db.collection("reports").document(payload.scanId).update({
+                    "followUpHistory": followUpHistory + [nextSuggestion],
+                    "status": updatedStatus,
+                })
+            except Exception as e:
+                logger.warning(f"Could not update report follow-up: {e}")
 
         return {
             "followUpMessage": nextSuggestion,
             "status": updatedStatus,
             "summary": summary,
-            "details": "Monitor your health metrics regularly and adjust lifestyle as recommended.",
+            "details": "Monitor your health metrics regularly.",
             "nextCheckIn": "4 weeks",
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
