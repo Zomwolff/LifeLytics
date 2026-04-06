@@ -378,48 +378,6 @@ async def updateUserProfile(userId: str, updates: Dict[str, Any]) -> bool:
         return False
 
 
-async def saveReport(userId: str, reportData: Dict[str, Any]) -> Optional[str]:
-    """Save parsed report into users/{user_id}/reports."""
-    try:
-        db = getFirestoreClient()
-        if not db:
-            logger.error("Firestore client not available")
-            return None
-
-        payload = {
-            **reportData,
-            "timestamp": datetime.now().isoformat(),
-        }
-        _log_write(userId)
-        _, ref = _user_ref(db, userId).collection("reports").add(payload)
-        return ref.id
-    except Exception as e:
-        logger.error(f"Error saving report for {userId}: {str(e)}")
-        return None
-
-
-async def getReports(userId: str) -> List[Dict[str, Any]]:
-    """Get reports from users/{user_id}/reports."""
-    try:
-        db = getFirestoreClient()
-        if not db:
-            logger.error("Firestore client not available")
-            return []
-
-        _log_read(userId)
-        docs = _user_ref(db, userId).collection("reports").stream()
-        reports: List[Dict[str, Any]] = []
-        for doc in docs:
-            row = doc.to_dict()
-            row["id"] = doc.id
-            reports.append(row)
-        reports.sort(key=lambda item: item.get("timestamp", ""), reverse=True)
-        return reports
-    except Exception as e:
-        logger.error(f"Error getting reports for {userId}: {str(e)}")
-        return []
-
-
 async def getCollectionDocs(userId: str, collectionName: str) -> List[Dict[str, Any]]:
     """Fetch all docs from users/{user_id}/{collectionName}."""
     try:
@@ -501,3 +459,56 @@ async def getReports(userId: str) -> list:
     except Exception as e:
         logger.error(f"Failed to get reports: {e}")
         return []
+    
+    async def saveChatMessage(userId: str, role: str, text: str) -> Optional[str]:
+    """Save a single chat message to users/{userId}/chat_history."""
+    try:
+        db = getFirestoreClient()
+        if not db:
+            return None
+        _log_write(userId)
+        _, ref = _user_ref(db, userId).collection("chat_history").add({
+            "role": role,
+            "text": text,
+            "timestamp": datetime.now().isoformat(),
+        })
+        return ref.id
+    except Exception as e:
+        logger.error(f"Error saving chat message for {userId}: {str(e)}")
+        return None
+
+
+async def getChatHistory(userId: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """Get recent chat history for a user, oldest first."""
+    try:
+        db = getFirestoreClient()
+        if not db:
+            return []
+        _log_read(userId)
+        docs = _user_ref(db, userId).collection("chat_history").stream()
+        messages = []
+        for doc in docs:
+            row = doc.to_dict()
+            row["id"] = doc.id
+            messages.append(row)
+        messages.sort(key=lambda x: x.get("timestamp", ""))
+        return messages[-limit:]  # return last N messages
+    except Exception as e:
+        logger.error(f"Error getting chat history for {userId}: {str(e)}")
+        return []
+
+
+async def clearChatHistory(userId: str) -> bool:
+    """Clear all chat history for a user."""
+    try:
+        db = getFirestoreClient()
+        if not db:
+            return False
+        docs = _user_ref(db, userId).collection("chat_history").stream()
+        for doc in docs:
+            doc.reference.delete()
+        logger.info(f"Cleared chat history for {userId}")
+        return True
+    except Exception as e:
+        logger.error(f"Error clearing chat history for {userId}: {str(e)}")
+        return False

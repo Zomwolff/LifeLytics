@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { apiFetch } from "../api/client";
 
@@ -22,7 +22,6 @@ function normalizeAssistantText(payload) {
 
   const trimmed = asText.trim();
 
-  // Some models return JSON text like {"response":"..."}; unpack it recursively.
   if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
     try {
       const parsed = JSON.parse(trimmed);
@@ -36,50 +35,74 @@ function normalizeAssistantText(payload) {
 }
 
 export default function Chatbot({ user, goBack }) {
-  // TODO: Flip this to true (or derive from env/config) once chatbot backend is connected.
-  const isBackendConnected = true;
-
   const [chatInput, setChatInput] = useState("");
   const [isReplying, setIsReplying] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [messages, setMessages] = useState([]);
   const inputRef = useRef(null);
-  const [messages, setMessages] = useState([
-    {
-      id: crypto.randomUUID(),
-      role: "assistant",
-      text: isBackendConnected
-        ? `Hi ${user?.name || "there"}, how can I help you today?`
-        : "Backend not connected yet.",
-    },
-  ]);
+  const bottomRef = useRef(null);
+
+  // Load persistent chat history on mount
+  useEffect(() => {
+    async function loadHistory() {
+      try {
+        const data = await apiFetch("/chatbot/history");
+        if (data.history && data.history.length > 0) {
+          setMessages(data.history.map((m) => ({
+            id: m.id || crypto.randomUUID(),
+            role: m.role,
+            text: m.text,
+          })));
+        } else {
+          setMessages([{
+            id: crypto.randomUUID(),
+            role: "assistant",
+            text: `Hi ${user?.name || "there"}, how can I help you today?`,
+          }]);
+        }
+      } catch {
+        setMessages([{
+          id: crypto.randomUUID(),
+          role: "assistant",
+          text: `Hi ${user?.name || "there"}, how can I help you today?`,
+        }]);
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    }
+    loadHistory();
+  }, [user?.name]);
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isReplying]);
+
+  async function handleClearHistory() {
+    try {
+      await apiFetch("/chatbot/history", { method: "DELETE" });
+      setMessages([{
+        id: crypto.randomUUID(),
+        role: "assistant",
+        text: `Hi ${user?.name || "there"}, how can I help you today?`,
+      }]);
+    } catch {
+      // no-op
+    }
+  }
 
   async function handleSubmit(event) {
     event.preventDefault();
-    if (isReplying) {
-      return;
-    }
+    if (isReplying) return;
 
     const text = chatInput.trim();
-    if (!text) {
-      return;
-    }
+    if (!text) return;
 
     const userMessage = { id: crypto.randomUUID(), role: "user", text };
     setMessages((prev) => [...prev, userMessage]);
     setChatInput("");
     if (inputRef.current) {
       inputRef.current.style.height = "auto";
-    }
-
-    if (!isBackendConnected) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          text: "Backend not connected yet.",
-        },
-      ]);
-      return;
     }
 
     setIsReplying(true);
@@ -89,13 +112,13 @@ export default function Chatbot({ user, goBack }) {
         body: JSON.stringify({ message: text }),
       });
       const assistantText = normalizeAssistantText(data);
-      setMessages(prev => [...prev, {
+      setMessages((prev) => [...prev, {
         id: crypto.randomUUID(),
         role: "assistant",
         text: assistantText,
       }]);
     } catch {
-      setMessages(prev => [...prev, {
+      setMessages((prev) => [...prev, {
         id: crypto.randomUUID(),
         role: "assistant",
         text: "Unable to reach backend right now.",
@@ -106,9 +129,7 @@ export default function Chatbot({ user, goBack }) {
   }
 
   function handleInputChange(event) {
-    const nextValue = event.target.value;
-    setChatInput(nextValue);
-
+    setChatInput(event.target.value);
     event.target.style.height = "auto";
     const nextHeight = Math.min(event.target.scrollHeight, 140);
     event.target.style.height = `${nextHeight}px`;
@@ -150,36 +171,49 @@ export default function Chatbot({ user, goBack }) {
             <p className="text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-[#3b4f6d]">Assistant</p>
             <p className="text-sm font-semibold text-[#13223a]">LifeLytics Chatbot</p>
           </div>
+
+          <button
+            type="button"
+            onClick={handleClearHistory}
+            className="rounded-full border border-[#8ea2bf] bg-[rgba(255,255,255,0.68)] px-3 py-1.5 text-[0.68rem] font-semibold uppercase tracking-wide text-[#29405e] shadow-[0_8px_18px_rgba(31,43,64,0.15)]"
+          >
+            Clear
+          </button>
         </header>
 
         <div className="flex-1 overflow-y-auto rounded-[1rem] border border-[#a3b3cb] bg-[rgba(255,255,255,0.46)] px-3 py-3 shadow-[0_8px_20px_rgba(31,43,64,0.12)] backdrop-blur-[2px] md:px-4 md:py-4">
-          <ul className="flex flex-col gap-2">
-            {messages.map((message) => (
-              <li
-                key={message.id}
-                className={`w-fit max-w-[92%] rounded-2xl px-3 py-2 text-sm leading-relaxed shadow-[0_4px_10px_rgba(20,34,52,0.08)] md:max-w-[78%] ${
-                  message.role === "user"
-                    ? "self-end bg-[linear-gradient(160deg,#1f2c40,#131a26)] text-white"
-                    : "self-start bg-[rgba(31,44,64,0.08)] text-[#1a2b43]"
-                }`}
-              >
-                <p className="whitespace-pre-wrap break-words">{message.text}</p>
-              </li>
-            ))}
-            {isReplying ? (
-              <li className="self-start w-fit max-w-[92%] rounded-2xl bg-[rgba(31,44,64,0.08)] px-3 py-2 text-[#1a2b43] shadow-[0_4px_10px_rgba(20,34,52,0.08)] md:max-w-[78%]">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">LifeLytics is thinking</span>
-                  <div className="flex items-end gap-1" aria-label="Assistant is typing" role="status" aria-live="polite">
-                    <span className="h-2 w-1 rounded bg-[#2c4567] animate-pulse" style={{ animationDelay: "0ms" }} />
-                    <span className="h-3 w-1 rounded bg-[#2c4567] animate-pulse" style={{ animationDelay: "120ms" }} />
-                    <span className="h-2 w-1 rounded bg-[#2c4567] animate-pulse" style={{ animationDelay: "240ms" }} />
-                    <span className="h-3 w-1 rounded bg-[#2c4567] animate-pulse" style={{ animationDelay: "360ms" }} />
+          {isLoadingHistory ? (
+            <p className="pt-4 text-center text-xs font-semibold text-[#4e6486]">Loading history...</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {messages.map((message) => (
+                <li
+                  key={message.id}
+                  className={`w-fit max-w-[92%] rounded-2xl px-3 py-2 text-sm leading-relaxed shadow-[0_4px_10px_rgba(20,34,52,0.08)] md:max-w-[78%] ${
+                    message.role === "user"
+                      ? "self-end bg-[linear-gradient(160deg,#1f2c40,#131a26)] text-white"
+                      : "self-start bg-[rgba(31,44,64,0.08)] text-[#1a2b43]"
+                  }`}
+                >
+                  <p className="whitespace-pre-wrap break-words">{message.text}</p>
+                </li>
+              ))}
+              {isReplying ? (
+                <li className="self-start w-fit max-w-[92%] rounded-2xl bg-[rgba(31,44,64,0.08)] px-3 py-2 text-[#1a2b43] shadow-[0_4px_10px_rgba(20,34,52,0.08)] md:max-w-[78%]">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">LifeLytics is thinking</span>
+                    <div className="flex items-end gap-1" aria-label="Assistant is typing" role="status" aria-live="polite">
+                      <span className="h-2 w-1 rounded bg-[#2c4567] animate-pulse" style={{ animationDelay: "0ms" }} />
+                      <span className="h-3 w-1 rounded bg-[#2c4567] animate-pulse" style={{ animationDelay: "120ms" }} />
+                      <span className="h-2 w-1 rounded bg-[#2c4567] animate-pulse" style={{ animationDelay: "240ms" }} />
+                      <span className="h-3 w-1 rounded bg-[#2c4567] animate-pulse" style={{ animationDelay: "360ms" }} />
+                    </div>
                   </div>
-                </div>
-              </li>
-            ) : null}
-          </ul>
+                </li>
+              ) : null}
+              <div ref={bottomRef} />
+            </ul>
+          )}
         </div>
 
         <form
