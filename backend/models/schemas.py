@@ -1,7 +1,4 @@
-"""Pydantic models and schemas for request/response validation.
-
-These models ensure data consistency and provide API documentation.
-"""
+"""Pydantic models and schemas for request/response validation."""
 
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
@@ -9,27 +6,19 @@ from typing import Optional, Dict, Any, List
 
 # Health Metrics
 class HeightRequest(BaseModel):
-    """Height input (in meters)."""
-
     height: float = Field(..., gt=0, le=3, description="Height in meters (0 < h <= 3)")
 
 
 class WeightRequest(BaseModel):
-    """Weight input (in kilograms)."""
-
     weight: float = Field(..., gt=0, le=500, description="Weight in kg (0 < w <= 500)")
 
 
 class BMIResponse(BaseModel):
-    """BMI calculation result."""
-
     bmi: float
 
 
 # Smartwatch Data
 class SmartwatchData(BaseModel):
-    """Wearable device data."""
-
     date: Optional[str] = Field(None, description="Date in YYYY-MM-DD format")
     steps: Optional[int] = Field(None, ge=0, description="Step count")
     heartRate: Optional[int] = Field(None, ge=30, le=220, description="Heart rate (bpm)")
@@ -50,17 +39,11 @@ class SmartwatchData(BaseModel):
 
 # Glucose Monitoring
 class GlucoseReading(BaseModel):
-    """Blood glucose reading."""
-
-    glucoseLevel: Optional[float] = Field(
-        None, ge=40, le=400, description="Glucose in mg/dL"
-    )
+    glucoseLevel: Optional[float] = Field(None, ge=40, le=400, description="Glucose in mg/dL")
     value: Optional[float] = Field(None, description="Alternative glucose field")
     unit: Optional[str] = Field("mg/dL", description="Measurement unit")
     timestamp: Optional[str] = None
-    mealType: Optional[str] = Field(
-        None, description="Before/after meal (fasting/postprandial)"
-    )
+    mealType: Optional[str] = Field(None, description="Before/after meal (fasting/postprandial)")
 
     class Config:
         example = {
@@ -72,21 +55,15 @@ class GlucoseReading(BaseModel):
 
 # Chat
 class ChatRequest(BaseModel):
-    """User message to chatbot."""
-
     message: str = Field(..., min_length=1, max_length=2000)
 
 
 class ChatResponse(BaseModel):
-    """Chatbot response."""
-
     response: str
 
 
 # Health Logs
 class HealthLogEntry(BaseModel):
-    """General health log entry."""
-
     logType: str
     value: float
     unit: Optional[str] = None
@@ -95,30 +72,22 @@ class HealthLogEntry(BaseModel):
 
 # Insights
 class InsightRequest(BaseModel):
-    """Request health insights generation."""
-
     forceRefresh: Optional[bool] = False
 
 
 class HealthInsight(BaseModel):
-    """Individual health insight."""
-
     title: str
     description: str
-    severity: Optional[str] = None  # low, medium, high
+    severity: Optional[str] = None
 
 
 class HealthRecommendation(BaseModel):
-    """Health recommendation."""
-
     title: str
     description: str
     priority: Optional[str] = None
 
 
 class InsightResponse(BaseModel):
-    """Generated health insights."""
-
     insights: List[str]
     risks: List[str]
     recommendations: List[str]
@@ -128,25 +97,19 @@ class InsightResponse(BaseModel):
 
 # File Upload
 class ReportResponse(BaseModel):
-    """Parsed report result."""
-
     filename: str
     nutrients: Dict[str, str]
     metabolic_markers: Optional[Dict[str, str]] = None
 
 
-# User Profile
+# User Profile (legacy)
 class UserMetrics(BaseModel):
-    """User health metrics summary."""
-
     height: Optional[float] = None
     weight: Optional[float] = None
     bmi: Optional[float] = None
 
 
 class UserHealthProfile(BaseModel):
-    """Complete user health profile."""
-
     userId: str
     height: Optional[float] = None
     weight: Optional[float] = None
@@ -155,3 +118,32 @@ class UserHealthProfile(BaseModel):
     smartwatch: List[Dict[str, Any]] = []
     healthLogs: List[Dict[str, Any]] = []
 
+
+# User Profile (Firestore)
+class CreateProfileRequest(BaseModel):
+    name: str
+    email: str
+
+
+class UpdateProfileFieldRequest(BaseModel):
+    field: str
+    value: Any
+
+
+class SaveMetricsRequest(BaseModel):
+    heightCm: float = Field(..., gt=79, le=300)
+    weightKg: float = Field(..., gt=19, le=500)
+    targetSteps: int = Field(..., ge=1000, le=50000)
+    caloriesTarget: int = Field(..., ge=1200, le=5000)
+
+
+class UserProfileResponse(BaseModel):
+    id: str
+    name: str
+    email: str
+    age: Optional[float] = None
+    gender: Optional[str] = None
+    heightCm: Optional[float] = None
+    weightKg: Optional[float] = None
+    targetSteps: Optional[int] = None
+    caloriesTarget: Optional[int] = None
