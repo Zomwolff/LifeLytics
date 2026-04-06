@@ -30,6 +30,7 @@ class BMIResponse(BaseModel):
 class SmartwatchData(BaseModel):
     """Wearable device data."""
 
+    date: Optional[str] = Field(None, description="Date in YYYY-MM-DD format")
     steps: Optional[int] = Field(None, ge=0, description="Step count")
     heartRate: Optional[int] = Field(None, ge=30, le=220, description="Heart rate (bpm)")
     caloriesBurned: Optional[float] = Field(None, ge=0, description="Calories burned")

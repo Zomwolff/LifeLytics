@@ -4,6 +4,8 @@ import { motion } from "framer-motion";
 export default function SetupMetrics({ user, onContinue }) {
   const [heightCm, setHeightCm] = useState(user?.heightCm ? String(user.heightCm) : "");
   const [weightKg, setWeightKg] = useState(user?.weightKg ? String(user.weightKg) : "");
+  const [targetSteps, setTargetSteps] = useState(user?.targetSteps ? String(user.targetSteps) : "10000");
+  const [caloriesTarget, setCaloriesTarget] = useState(user?.caloriesTarget ? String(user.caloriesTarget) : "2000");
   const [error, setError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
@@ -11,7 +13,7 @@ export default function SetupMetrics({ user, onContinue }) {
     event.preventDefault();
     setError("");
     setIsSaving(true);
-    const result = await onContinue({ heightCm, weightKg });
+    const result = await onContinue({ heightCm, weightKg, targetSteps, caloriesTarget });
     if (!result.ok) {
       setError(result.error || "Could not save your metrics.");
     }
@@ -77,6 +79,34 @@ export default function SetupMetrics({ user, onContinue }) {
                 value={weightKg}
                 onChange={(event) => setWeightKg(event.target.value)}
                 placeholder="e.g. 72"
+                className="h-11 w-full rounded-[0.85rem] border border-[#b8c6da] bg-[rgba(255,255,255,0.78)] px-3 text-base font-semibold text-[#162339] outline-none placeholder:text-[#7f8ea8]"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-[#435675]">Target Steps</span>
+              <input
+                type="number"
+                min="1000"
+                max="50000"
+                step="500"
+                value={targetSteps}
+                onChange={(event) => setTargetSteps(event.target.value)}
+                placeholder="e.g. 10000"
+                className="h-11 w-full rounded-[0.85rem] border border-[#b8c6da] bg-[rgba(255,255,255,0.78)] px-3 text-base font-semibold text-[#162339] outline-none placeholder:text-[#7f8ea8]"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-[#435675]">Daily Calories Target (kcal)</span>
+              <input
+                type="number"
+                min="1200"
+                max="5000"
+                step="50"
+                value={caloriesTarget}
+                onChange={(event) => setCaloriesTarget(event.target.value)}
+                placeholder="e.g. 2000"
                 className="h-11 w-full rounded-[0.85rem] border border-[#b8c6da] bg-[rgba(255,255,255,0.78)] px-3 text-base font-semibold text-[#162339] outline-none placeholder:text-[#7f8ea8]"
               />
             </label>

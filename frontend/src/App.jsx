@@ -8,24 +8,110 @@ import AiInsights from "./pages/AiInsights";
 import Chatbot from "./pages/Chatbot";
 import Metrics from "./pages/Metrics";
 import Trends from "./pages/Trends";
+import FoodLog from "./pages/FoodLog";
 import SetupMetrics from "./pages/SetupMetrics";
 import Profile from "./pages/Profile";
 import { getSessionUser, loginUser, logoutUser, registerUser, saveUserMetrics, subscribeToAuthChanges, updateUserProfileField } from "./auth";
+
+const PAGE_KEY = "lifelytics_page_v1";
+const CHAT_RETURN_PAGE_KEY = "lifelytics_chat_return_page_v1";
 
 function hasMetrics(user) {
   return Boolean(user && Number.isFinite(user.heightCm) && Number.isFinite(user.weightKg));
 }
 
+function getSavedPage() {
+  try {
+    return sessionStorage.getItem(PAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setSavedPage(page) {
+  try {
+    sessionStorage.setItem(PAGE_KEY, page);
+  } catch {
+    // no-op
+  }
+}
+
+function clearSavedPage() {
+  try {
+    sessionStorage.removeItem(PAGE_KEY);
+  } catch {
+    // no-op
+  }
+}
+
+function getSavedChatReturnPage() {
+  try {
+    return sessionStorage.getItem(CHAT_RETURN_PAGE_KEY) || "home";
+  } catch {
+    return "home";
+  }
+}
+
+function setSavedChatReturnPage(page) {
+  try {
+    sessionStorage.setItem(CHAT_RETURN_PAGE_KEY, page);
+  } catch {
+    // no-op
+  }
+}
+
+function clearSavedChatReturnPage() {
+  try {
+    sessionStorage.removeItem(CHAT_RETURN_PAGE_KEY);
+  } catch {
+    // no-op
+  }
+}
+
+function isPublicPage(page) {
+  return ["startup", "login", "signup"].includes(page);
+}
+
 export default function App() {
-  const [page, setPage] = useState("startup");
+  const [page, setPage] = useState(() => {
+    const sessionUser = getSessionUser();
+    const savedPage = getSavedPage();
+
+    if (sessionUser) {
+      if (savedPage && !isPublicPage(savedPage)) {
+        return savedPage;
+      }
+      return hasMetrics(sessionUser) ? "home" : "setup-metrics";
+    }
+
+    return savedPage && isPublicPage(savedPage) ? savedPage : "startup";
+  });
   const [user, setUser] = useState(null);
-  const [chatReturnPage, setChatReturnPage] = useState("home");
+  const [chatReturnPage, setChatReturnPage] = useState(() => getSavedChatReturnPage());
+
+  useEffect(() => {
+    setSavedPage(page);
+  }, [page]);
+
+  useEffect(() => {
+    setSavedChatReturnPage(chatReturnPage);
+  }, [chatReturnPage]);
 
   useEffect(() => {
     const sessionUser = getSessionUser();
     if (sessionUser) {
       setUser(sessionUser);
-      setPage(hasMetrics(sessionUser) ? "home" : "setup-metrics");
+      setPage((currentPage) => {
+        const savedPage = getSavedPage();
+        if (savedPage && !isPublicPage(savedPage)) {
+          if (hasMetrics(sessionUser) || savedPage === "setup-metrics") {
+            return savedPage;
+          }
+          return "setup-metrics";
+        }
+
+        return hasMetrics(sessionUser) ? currentPage : "setup-metrics";
+      });
     }
 
     const unsubscribe = subscribeToAuthChanges((nextUser) => {
@@ -71,12 +157,12 @@ export default function App() {
     return result;
   }
 
-  function handleSaveMetrics(payload) {
+  async function handleSaveMetrics(payload) {
     if (!user?.id) {
       return { ok: false, error: "Session not found. Please login again." };
     }
 
-    const result = saveUserMetrics({ userId: user.id, ...payload });
+    const result = await saveUserMetrics({ userId: user.id, ...payload });
     if (result.ok) {
       setUser(result.user);
       setPage("home");
@@ -84,12 +170,12 @@ export default function App() {
     return result;
   }
 
-  function handleSaveProfileField({ field, value }) {
+  async function handleSaveProfileField({ field, value }) {
     if (!user?.id) {
       return { ok: false, error: "Session not found. Please login again." };
     }
 
-    const result = updateUserProfileField({ userId: user.id, field, value });
+    const result = await updateUserProfileField({ userId: user.id, field, value });
     if (result.ok) {
       setUser(result.user);
     }
@@ -99,6 +185,8 @@ export default function App() {
   function handleLogout() {
     logoutUser();
     setUser(null);
+    clearSavedPage();
+    clearSavedChatReturnPage();
     setPage("startup");
   }
 
@@ -111,5 +199,6 @@ export default function App() {
   if (page === "chat") return <Chatbot user={user} goBack={() => setPage(chatReturnPage)} />;
   if (page === "metrics") return <Metrics user={user} onLogout={handleLogout} goBack={() => setPage("home")} goHome={() => setPage("home")} goProfile={() => setPage("profile")} goMetrics={() => setPage("metrics")} goChat={() => { setChatReturnPage("metrics"); setPage("chat"); }} />;
   if (page === "trends") return <Trends user={user} goBack={() => setPage("home")} />;
-  return <Home user={user} onLogout={handleLogout} goHome={() => setPage("home")} goProfile={() => setPage("profile")} goMetrics={() => setPage("metrics")} goTrends={() => setPage("trends")} goAi={() => setPage("ai-insights")} goChat={() => { setChatReturnPage("home"); setPage("chat"); }} />;
+  if (page === "food-log") return <FoodLog user={user} goBack={() => setPage("home")} />;
+  return <Home user={user} onLogout={handleLogout} goHome={() => setPage("home")} goProfile={() => setPage("profile")} goMetrics={() => setPage("metrics")} goTrends={() => setPage("trends")} goAi={() => setPage("ai-insights")} goFoodLog={() => setPage("food-log")} goChat={() => { setChatReturnPage("home"); setPage("chat"); }} />;
 }

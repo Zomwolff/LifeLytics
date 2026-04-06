@@ -2,10 +2,106 @@ import { apiFetch } from "../api/client";
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 
-export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProfile, goAi, onLogout }) {
+const DEFAULT_INTAKE = {
+  calories: 0,
+  totalCalories: 0,
+  steps: 0,
+  stepsTarget: 10000,
+  protein: 0,
+  carbs: 0,
+  fats: 0,
+  caloriesBurnt: 0,
+};
+
+function getIndiaDateString() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function formatPercent(value, total) {
+  if (!total) return "0%";
+  return `${Math.round((value / total) * 100)}%`;
+}
+
+function MiniProgressCard({ title, value, target, progress, color, subtitle, valueSuffix = "" }) {
+  const strokeLength = `${(progress * 100).toFixed(1)} 100`;
+
+  return (
+    <div className="rounded-[1.35rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)]">
+      <p className="text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-[#a7c1e4]">{title}</p>
+      <div className="mt-2 flex items-center gap-3">
+        <div className="relative grid h-16 w-16 place-items-center rounded-full bg-white/5">
+          <svg viewBox="0 0 100 100" className="h-16 w-16" fill="none" aria-hidden="true">
+            <circle cx="50" cy="50" r="36" stroke="rgba(158,207,255,0.18)" strokeWidth="10" />
+            <circle
+              cx="50"
+              cy="50"
+              r="36"
+              stroke={color}
+              strokeWidth="10"
+              strokeLinecap="round"
+              pathLength="100"
+              strokeDasharray={strokeLength}
+              transform="rotate(-90 50 50)"
+            />
+          </svg>
+          <div className="pointer-events-none absolute text-[0.78rem] font-bold text-white">{value}</div>
+        </div>
+        <div>
+          <p className="text-[1.15rem] font-bold leading-none">{value}{valueSuffix}</p>
+          <p className="mt-1 text-[0.78rem] text-[#d6e4f8]">{subtitle}</p>
+          {target && <p className="mt-1 text-[0.78rem] font-semibold text-[#a7c1e4]">Target {target}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function IntakeRing({ intake }) {
+  const proteinKcal = intake.protein * 4;
+  const carbKcal = intake.carbs * 4;
+  const fatKcal = intake.fats * 9;
+  const total = proteinKcal + carbKcal + fatKcal;
+
+  return (
+    <div className="rounded-[1.2rem] border border-[#d2dcec] bg-white/80 px-4 py-4 shadow-[0_8px_18px_rgba(31,43,64,0.08)]">
+      <p className="text-center text-[0.85rem] font-bold uppercase tracking-[0.16em] text-[#58739a]">Calories</p>
+      <div className="mx-auto mt-4 grid h-48 w-48 place-items-center rounded-full bg-[conic-gradient(#4f91f2_0_20.5%,#5ed1a6_20.5%_65.9%,#f4a164_65.9%_100%)] p-5">
+        <div className="grid h-full w-full place-items-center rounded-full bg-[#f7f9fe] text-center text-[#22334f] shadow-inner">
+          <div>
+            <p className="text-[2rem] font-bold leading-none">{intake.totalCalories.toLocaleString()}</p>
+            <p className="mt-2 text-[0.78rem] font-semibold uppercase tracking-[0.18em] text-[#6b7f99]">kcal</p>
+          </div>
+        </div>
+      </div>
+      <p className="mt-4 text-center text-[0.8rem] font-semibold uppercase tracking-[0.16em] text-[#58739a]">Total Calorie Intake</p>
+      <div className="mt-4 grid grid-cols-3 gap-2 text-[0.72rem] font-semibold text-[#29405e]">
+        <div className="rounded-[0.9rem] border border-[#d3ddef] bg-[#f5f8fd] px-2 py-2 text-center">
+          <p className="text-[#58739a]">Protein</p>
+          <p className="mt-1 text-base text-[#20314a]">{formatPercent(proteinKcal, total)}</p>
+        </div>
+        <div className="rounded-[0.9rem] border border-[#d3ddef] bg-[#eefbf3] px-2 py-2 text-center">
+          <p className="text-[#58739a]">Carbs</p>
+          <p className="mt-1 text-base text-[#20314a]">{formatPercent(carbKcal, total)}</p>
+        </div>
+        <div className="rounded-[0.9rem] border border-[#d3ddef] bg-[#fff2e7] px-2 py-2 text-center">
+          <p className="text-[#58739a]">Fats</p>
+          <p className="mt-1 text-base text-[#20314a]">{formatPercent(fatKcal, total)}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProfile, goAi, goFoodLog, onLogout }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isPrescriptionModalOpen, setIsPrescriptionModalOpen] = useState(false);
+  const [isIntakeModalOpen, setIsIntakeModalOpen] = useState(false);
   const [selectedPrescriptionFile, setSelectedPrescriptionFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [isScanningPrescription, setIsScanningPrescription] = useState(false);
@@ -13,8 +109,14 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
   const [scanResult, setScanResult] = useState(null);
   const [followUpHistory, setFollowUpHistory] = useState([]);
   const [isFetchingFollowUp, setIsFetchingFollowUp] = useState(false);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+  const [todayIntake, setTodayIntake] = useState(DEFAULT_INTAKE);
+  const [currentDateTime, setCurrentDateTime] = useState(new Date());
   const uploadInputRef = useRef(null);
-  const cameraInputRef = useRef(null);
+  const videoRef = useRef(null);
+  const captureCanvasRef = useRef(null);
+  const cameraStreamRef = useRef(null);
   const bmi = Number.isFinite(user?.heightCm) && Number.isFinite(user?.weightKg)
     ? user.weightKg / ((user.heightCm / 100) * (user.heightCm / 100))
     : null;
@@ -27,17 +129,93 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
       if (previewUrl) {
         URL.revokeObjectURL(previewUrl);
       }
+
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+        cameraStreamRef.current = null;
+      }
     };
   }, [previewUrl]);
 
-  async function fileToDataUrl(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ""));
-      reader.onerror = () => reject(new Error("Failed to read image file."));
-      reader.readAsDataURL(file);
-    });
-  }
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentDateTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!isPrescriptionModalOpen && cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+      setIsCameraActive(false);
+    }
+  }, [isPrescriptionModalOpen]);
+
+  // Fetch daily intake + activity summary for today
+  useEffect(() => {
+    async function fetchDailySummary() {
+      if (!user?.id) return;
+
+      try {
+        const today = getIndiaDateString();
+        const [nutritionResponse, smartwatchResponse] = await Promise.all([
+          apiFetch(`/nutrition/summary?date=${today}`, { method: "GET" }),
+          apiFetch(`/health/smartwatch/summary?date=${today}`, { method: "GET" }),
+        ]);
+
+        setTodayIntake((prev) => ({
+          ...prev,
+          totalCalories: nutritionResponse?.totalCalories || 0,
+          protein: nutritionResponse?.totalProtein || 0,
+          carbs: nutritionResponse?.totalCarbs || 0,
+          fats: nutritionResponse?.totalFat || 0,
+          calories: nutritionResponse?.totalCalories || 0,
+          steps: smartwatchResponse?.totalSteps || 0,
+          caloriesBurnt: smartwatchResponse?.totalCaloriesBurned || 0,
+          stepsTarget: Number.isFinite(user?.targetSteps) ? user.targetSteps : prev.stepsTarget,
+        }));
+      } catch (err) {
+        console.warn("Could not fetch daily summary:", err);
+        // Use default values if fetch fails
+      }
+    }
+
+    fetchDailySummary();
+
+    // Keep dashboard responsive to newly available auth/session and background tab resumes.
+    const interval = setInterval(fetchDailySummary, 60 * 1000);
+    const onFocus = () => fetchDailySummary();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        fetchDailySummary();
+      }
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [user?.id, user?.targetSteps]);
+
+  useEffect(() => {
+    if (!isCameraActive || !videoRef.current || !cameraStreamRef.current) {
+      return;
+    }
+
+    const video = videoRef.current;
+    video.srcObject = cameraStreamRef.current;
+    const playPromise = video.play();
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch(() => {
+        setCameraError("Camera started, but preview could not autoplay. Tap Use Camera again.");
+      });
+    }
+  }, [isCameraActive]);
 
   function handlePrescriptionFileChange(event) {
     const file = event.target.files?.[0];
@@ -59,7 +237,92 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
     setScanResult(null);
     setFollowUpHistory([]);
     setScanError("");
+    setCameraError("");
     event.target.value = "";
+  }
+
+  function stopCamera() {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setIsCameraActive(false);
+  }
+
+  async function startCamera() {
+    setCameraError("");
+
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      setCameraError("Camera access is not supported in this browser.");
+      return;
+    }
+
+    try {
+      stopCamera();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 640 },
+          height: { ideal: 360 },
+        },
+        audio: false,
+      });
+
+      cameraStreamRef.current = stream;
+      setIsCameraActive(true);
+    } catch {
+      setCameraError("Camera permission denied or unavailable. Please allow camera access.");
+      stopCamera();
+    }
+  }
+
+  async function captureFromCamera() {
+    if (!videoRef.current || !captureCanvasRef.current) {
+      setCameraError("Camera is not ready yet.");
+      return;
+    }
+
+    const video = videoRef.current;
+    const canvas = captureCanvasRef.current;
+    const width = video.videoWidth || 640;
+    const height = video.videoHeight || 360;
+    canvas.width = width;
+    canvas.height = height;
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      setCameraError("Unable to capture image from camera.");
+      return;
+    }
+
+    context.drawImage(video, 0, 0, width, height);
+
+    const blob = await new Promise((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", 0.92);
+    });
+
+    if (!blob) {
+      setCameraError("Unable to capture image from camera.");
+      return;
+    }
+
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
+
+    const file = new File([blob], `report-${Date.now()}.jpg`, { type: "image/jpeg" });
+    const nextPreviewUrl = URL.createObjectURL(file);
+
+    setSelectedPrescriptionFile(file);
+    setPreviewUrl(nextPreviewUrl);
+    setScanResult(null);
+    setFollowUpHistory([]);
+    setScanError("");
+    setCameraError("");
+    stopCamera();
   }
 
   function normalizeReportStatus(rawStatus) {
@@ -92,7 +355,7 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
 
   async function handleScanPrescription() {
     if (!selectedPrescriptionFile) {
-      setScanError("Upload or take a photo before scanning.");
+      setScanError("Upload from gallery or capture from camera before scanning.");
       return;
     }
 
@@ -100,8 +363,6 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
     setScanError("");
 
     try {
-      const imageDataUrl = await fileToDataUrl(selectedPrescriptionFile);
-
       const form = new FormData();
       form.append("file", selectedPrescriptionFile);
       const res = await fetch(`${import.meta.env.VITE_API_URL || ""}/upload/report`, {
@@ -170,8 +431,10 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
   }
 
   function closePrescriptionModal() {
+    stopCamera();
     setIsPrescriptionModalOpen(false);
     setScanError("");
+    setCameraError("");
   }
 
   return (
@@ -179,6 +442,72 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
       className="relative min-h-screen overflow-hidden bg-[linear-gradient(140deg,#eef3ff_0%,#d6e2f5_42%,#c4d2e5_100%)] px-4 py-6 md:px-8 lg:px-10"
       style={{ fontFamily: "'Sora', sans-serif" }}
     >
+
+      {isIntakeModalOpen ? (
+        <div className="fixed inset-0 z-30 grid place-items-center bg-[rgba(10,20,34,0.56)] px-4 py-4">
+          <div className="relative w-full max-w-[1120px] rounded-[1.9rem] border border-[#d0dbee] bg-[linear-gradient(180deg,#f9fbff,#e8f0fb)] p-4 shadow-[0_24px_52px_rgba(7,19,36,0.4)] md:p-5">
+            <button
+              type="button"
+              onClick={() => setIsIntakeModalOpen(false)}
+              className="absolute right-4 top-4 rounded-full border border-[#b6c6da] bg-white px-4 py-2 text-sm font-semibold text-[#29405e] shadow-sm"
+            >
+              Close
+            </button>
+
+            <div className="text-center">
+              <p className="text-[0.8rem] font-semibold uppercase tracking-[0.22em] text-[#58739a]">Daily Nutrition</p>
+              <h3 className="mt-1 text-[2rem] font-semibold leading-none text-[#243652]" style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}>
+                Today Intake Details
+              </h3>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-[330px_1fr]">
+              <div className="rounded-[1.5rem] border border-[#d2dcec] bg-white/90 p-4 shadow-[0_8px_18px_rgba(31,43,64,0.08)]">
+                <IntakeRing intake={todayIntake} />
+              </div>
+
+              <div className="rounded-[1.5rem] border border-[#d2dcec] bg-white/90 p-4 shadow-[0_8px_18px_rgba(31,43,64,0.08)]">
+                <p className="text-center text-[0.85rem] font-bold uppercase tracking-[0.16em] text-[#58739a]">Macro Breakdown</p>
+                <div className="mt-4 space-y-3">
+                  {(() => {
+                    const proteinCals = todayIntake.protein * 4;
+                    const carbsCals = todayIntake.carbs * 4;
+                    const fatsCals = todayIntake.fats * 9;
+                    const totalCals = proteinCals + carbsCals + fatsCals;
+                    const proteinPct = totalCals > 0 ? Math.round((proteinCals / totalCals) * 100) : 0;
+                    const carbsPct = totalCals > 0 ? Math.round((carbsCals / totalCals) * 100) : 0;
+                    const fatsPct = totalCals > 0 ? Math.round((fatsCals / totalCals) * 100) : 0;
+
+                    return (
+                      <>
+                        <div className="rounded-[1rem] border border-[#d2dcec] bg-[#f4f7fd] px-4 py-4 text-center">
+                          <p className="text-[0.82rem] font-bold uppercase tracking-[0.16em] text-[#58739a]">Protein</p>
+                          <p className="mt-2 text-[1.65rem] font-bold text-[#21314a]">{todayIntake.protein.toFixed(0)} g</p>
+                          <p className="mt-1 text-sm text-[#6b7f99]">{proteinCals.toFixed(0)} kcal ({proteinPct}%)</p>
+                        </div>
+                        <div className="rounded-[1rem] border border-[#d2dcec] bg-[#f2fbf5] px-4 py-4 text-center">
+                          <p className="text-[0.82rem] font-bold uppercase tracking-[0.16em] text-[#58739a]">Carbs</p>
+                          <p className="mt-2 text-[1.65rem] font-bold text-[#21314a]">{todayIntake.carbs.toFixed(0)} g</p>
+                          <p className="mt-1 text-sm text-[#6b7f99]">{carbsCals.toFixed(0)} kcal ({carbsPct}%)</p>
+                        </div>
+                        <div className="rounded-[1rem] border border-[#d2dcec] bg-[#fff5eb] px-4 py-4 text-center">
+                          <p className="text-[0.82rem] font-bold uppercase tracking-[0.16em] text-[#58739a]">Fats</p>
+                          <p className="mt-2 text-[1.65rem] font-bold text-[#21314a]">{todayIntake.fats.toFixed(0)} g</p>
+                          <p className="mt-1 text-sm text-[#6b7f99]">{fatsCals.toFixed(0)} kcal ({fatsPct}%)</p>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+
+                <div className="mt-3 rounded-[1rem] border border-[#d2dcec] bg-white px-4 py-3 text-center text-[0.95rem] font-semibold text-[#58739a]">
+                  Source: Food Log table totals for the running day.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="pointer-events-none absolute -left-24 -top-20 h-64 w-64 rounded-full bg-[radial-gradient(circle,#71bcff_0%,rgba(113,188,255,0.32)_56%,transparent_100%)] blur-2xl" />
       <div className="pointer-events-none absolute -bottom-28 -right-24 h-72 w-72 rounded-full bg-[radial-gradient(circle,#69dcb0_0%,rgba(105,220,176,0.28)_56%,transparent_100%)] blur-2xl" />
 
@@ -311,6 +640,9 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
           >
             {user?.name ? `Welcome, ${user.name}` : "Welcome"}
           </p>
+          <p className="mt-2 text-sm font-medium text-[#6a7a94]">
+            {currentDateTime.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })} • {currentDateTime.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          </p>
         </div>
 
         <main className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -397,7 +729,7 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
           <button
             type="button"
             onClick={() => setIsPrescriptionModalOpen(true)}
-            className="col-span-2 min-h-[106px] rounded-[1.35rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-left text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)] md:col-span-4"
+            className="col-span-2 min-h-[106px] rounded-[1.35rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-left text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)] md:col-span-2"
           >
             <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="7" width="18" height="13" rx="2" />
@@ -408,8 +740,61 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
               className="mt-1 text-[1.7rem] font-bold leading-[1.02] tracking-[-0.01em]"
               style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}
             >
-              Prescription Insights
+              Report Insights
             </p>
+          </button>
+
+          <button
+            type="button"
+            onClick={goFoodLog}
+            className="min-h-[106px] rounded-[1.35rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-left text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)]"
+          >
+            <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 3v18" />
+              <path d="M4 7h10" />
+              <path d="M4 12h8" />
+              <path d="M4 17h10" />
+            </svg>
+            <p className="mt-1 text-[1.55rem] font-bold leading-[1.03] tracking-[-0.01em]" style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}>
+              Food Log
+            </p>
+          </button>
+
+          <MiniProgressCard
+            title="Today Steps"
+            value={todayIntake.steps.toString()}
+            target={`${todayIntake.stepsTarget.toLocaleString()}`}
+            progress={todayIntake.stepsTarget > 0 ? Math.min(todayIntake.steps / todayIntake.stepsTarget, 1) : 0}
+            color="#5ed1a6"
+            subtitle="Walked today"
+          />
+
+          <MiniProgressCard
+            title="Total Burn"
+            value={todayIntake.caloriesBurnt.toFixed(0)}
+            progress={todayIntake.totalCalories > 0 ? Math.min(todayIntake.caloriesBurnt / todayIntake.totalCalories, 1) : 0}
+            color="#f4a164"
+            subtitle="Calories burned"
+          />
+
+          <button
+            type="button"
+            onClick={() => setIsIntakeModalOpen(true)}
+            className="rounded-[1.35rem] border border-white/25 bg-[linear-gradient(145deg,#1b273a,#27344a)] px-4 py-3 text-left text-white shadow-[0_12px_22px_rgba(17,29,46,0.26)]"
+          >
+            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-[#a7c1e4]">Today Intake</p>
+            <div className="mt-2 flex items-center gap-3">
+              <div className="relative grid h-16 w-16 place-items-center rounded-full bg-[conic-gradient(#4f91f2_0_20.5%,#5ed1a6_20.5%_65.9%,#f4a164_65.9%_100%)] p-1">
+                <div className="grid h-full w-full place-items-center rounded-full bg-[#22334f] text-center">
+                  <span className="text-[0.78rem] font-bold text-white">{todayIntake.totalCalories}</span>
+                </div>
+              </div>
+              <div>
+                <p className="text-[1.1rem] font-bold leading-none">{todayIntake.totalCalories}</p>
+                <p className="mt-1 text-[0.76rem] text-[#d6e4f8]">P {todayIntake.protein.toFixed(0)}g | C {todayIntake.carbs.toFixed(0)}g | F {todayIntake.fats.toFixed(0)}g</p>
+                <p className="mt-1 text-[0.76rem] font-semibold text-[#a7c1e4]">kcal intake</p>
+              </div>
+            </div>
           </button>
         </main>
 
@@ -448,7 +833,7 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
                 className="text-[1.08rem] font-bold text-[#16233a]"
                 style={{ fontFamily: "'Space Grotesk', 'Sora', sans-serif" }}
               >
-                Prescription Scan
+                Report Insights
               </p>
               <button
                 type="button"
@@ -465,14 +850,14 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
                 onClick={() => uploadInputRef.current?.click()}
                 className="rounded-xl border border-[#adbdd4] bg-white/80 px-3 py-2 text-sm font-semibold text-[#223752]"
               >
-                Upload Photo
+                Upload From Gallery
               </button>
               <button
                 type="button"
-                onClick={() => cameraInputRef.current?.click()}
+                onClick={startCamera}
                 className="rounded-xl border border-[#adbdd4] bg-white/80 px-3 py-2 text-sm font-semibold text-[#223752]"
               >
-                Take Photo
+                Use Camera
               </button>
             </div>
 
@@ -483,22 +868,46 @@ export default function Home({ user, goHome, goChat, goMetrics, goTrends, goProf
               onChange={handlePrescriptionFileChange}
               className="hidden"
             />
-            <input
-              ref={cameraInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={handlePrescriptionFileChange}
-              className="hidden"
-            />
+
+            {isCameraActive ? (
+              <div className="mt-3 rounded-xl border border-[#bccbdd] bg-white/80 p-2">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#4e6486]">Camera Preview</p>
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="h-36 w-full rounded-lg border border-[#d1dbeb] bg-[#0f1a2a] object-cover"
+                />
+                <canvas ref={captureCanvasRef} className="hidden" />
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={captureFromCamera}
+                    className="rounded-lg border border-[#2d4e76] bg-[linear-gradient(145deg,#2b5587,#2a4d7b)] px-2 py-2 text-xs font-semibold text-white"
+                  >
+                    Capture
+                  </button>
+                  <button
+                    type="button"
+                    onClick={stopCamera}
+                    className="rounded-lg border border-[#a9bbd3] bg-white px-2 py-2 text-xs font-semibold text-[#29405e]"
+                  >
+                    Stop Camera
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             <div className="mt-3 min-h-[120px] rounded-xl border border-[#bccbdd] bg-white/70 p-2">
               {previewUrl ? (
                 <img src={previewUrl} alt="Selected report" className="h-32 w-full rounded-lg object-cover md:h-44" />
               ) : (
-                <p className="pt-10 text-center text-xs font-medium text-[#4e6486]">Upload or capture a report image to begin scanning.</p>
+                <p className="pt-10 text-center text-xs font-medium text-[#4e6486]">Upload from gallery or capture in the camera window to begin scanning.</p>
               )}
             </div>
+
+            {cameraError ? <p className="mt-2 text-xs font-semibold text-[#8f2b2b]">{cameraError}</p> : null}
 
             <button
               type="button"

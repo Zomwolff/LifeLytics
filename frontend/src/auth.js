@@ -1,4 +1,5 @@
 import { auth } from "./firebase";
+import { apiFetch } from "./api/client";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -113,6 +114,8 @@ function toSafeUser(user) {
     gender: user.gender ?? null,
     heightCm: user.heightCm ?? null,
     weightKg: user.weightKg ?? null,
+    targetSteps: user.targetSteps ?? null,
+    caloriesTarget: user.caloriesTarget ?? null,
   };
 }
 
@@ -151,6 +154,22 @@ export async function registerUser({ name, email, password, confirmPassword }) {
     users.push(user);
     saveUsers(users);
     setSession(firebaseUid);
+
+    try {
+      await apiFetch("/health/profile", {
+        method: "POST",
+        body: JSON.stringify({
+          name: cleanName,
+          email: cleanEmail,
+        }),
+      });
+    } catch {
+      saveUsers(users.filter((u) => u.id !== firebaseUid));
+      await signOut(auth).catch(() => {});
+      clearSession();
+      return { ok: false, error: "Could not create the Firestore profile." };
+    }
+
     return { ok: true, user: toSafeUser(user) };
   } catch (err) {
     const msg = err.code === "auth/email-already-in-use"
@@ -209,9 +228,11 @@ export async function logoutUser() {
   clearSession();
 }
 
-export function saveUserMetrics({ userId, heightCm, weightKg }) {
+export async function saveUserMetrics({ userId, heightCm, weightKg, targetSteps, caloriesTarget }) {
   const parsedHeight = Number(heightCm);
   const parsedWeight = Number(weightKg);
+  const parsedSteps = Number(targetSteps);
+  const parsedCalories = Number(caloriesTarget);
 
   if (!Number.isFinite(parsedHeight) || parsedHeight < 80 || parsedHeight > 260) {
     return { ok: false, error: "Enter a valid height in cm." };
@@ -219,6 +240,14 @@ export function saveUserMetrics({ userId, heightCm, weightKg }) {
 
   if (!Number.isFinite(parsedWeight) || parsedWeight < 20 || parsedWeight > 400) {
     return { ok: false, error: "Enter a valid weight in kg." };
+  }
+
+  if (!Number.isFinite(parsedSteps) || parsedSteps < 1000 || parsedSteps > 50000) {
+    return { ok: false, error: "Enter a valid target steps (1000-50000)." };
+  }
+
+  if (!Number.isFinite(parsedCalories) || parsedCalories < 1200 || parsedCalories > 5000) {
+    return { ok: false, error: "Enter a valid daily calories target (1200-5000)." };
   }
 
   const users = loadUsers();
@@ -231,15 +260,31 @@ export function saveUserMetrics({ userId, heightCm, weightKg }) {
     ...users[index],
     heightCm: Number(parsedHeight.toFixed(1)),
     weightKg: Number(parsedWeight.toFixed(1)),
+    targetSteps: parsedSteps,
+    caloriesTarget: parsedCalories,
     updatedAt: new Date().toISOString(),
   };
+
+  try {
+    await apiFetch("/health/profile", {
+      method: "POST",
+      body: JSON.stringify({
+        heightCm: Number(parsedHeight.toFixed(1)),
+        weightKg: Number(parsedWeight.toFixed(1)),
+        targetSteps: parsedSteps,
+        caloriesTarget: parsedCalories,
+      }),
+    });
+  } catch (err) {
+    return { ok: false, error: "Could not save metrics to Firestore." };
+  }
 
   saveUsers(users);
   notifyAuthChanged();
   return { ok: true, user: toSafeUser(users[index]) };
 }
 
-export function updateUserProfileField({ userId, field, value }) {
+export async function updateUserProfileField({ userId, field, value }) {
   const users = loadUsers();
   const index = users.findIndex((u) => u.id === userId);
   if (index < 0) {
@@ -279,8 +324,29 @@ export function updateUserProfileField({ userId, field, value }) {
       return { ok: false, error: "Enter a valid weight in kg." };
     }
     users[index] = { ...current, weightKg: Number(parsedWeight.toFixed(1)), updatedAt: new Date().toISOString() };
+  } else if (field === "targetSteps") {
+    const parsedSteps = Number(value);
+    if (!Number.isFinite(parsedSteps) || parsedSteps < 1000 || parsedSteps > 50000) {
+      return { ok: false, error: "Enter valid target steps (1000-50000)." };
+    }
+    users[index] = { ...current, targetSteps: parsedSteps, updatedAt: new Date().toISOString() };
+  } else if (field === "caloriesTarget") {
+    const parsedCalories = Number(value);
+    if (!Number.isFinite(parsedCalories) || parsedCalories < 1200 || parsedCalories > 5000) {
+      return { ok: false, error: "Enter valid daily calories target (1200-5000)." };
+    }
+    users[index] = { ...current, caloriesTarget: parsedCalories, updatedAt: new Date().toISOString() };
   } else {
     return { ok: false, error: "Unsupported profile field." };
+  }
+
+  try {
+    await apiFetch("/health/profile", {
+      method: "POST",
+      body: JSON.stringify({ [field]: users[index][field] ?? value }),
+    });
+  } catch {
+    return { ok: false, error: "Could not save profile changes to Firestore." };
   }
 
   saveUsers(users);

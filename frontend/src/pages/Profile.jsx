@@ -88,8 +88,8 @@ export default function Profile({ user, onSaveField, goBack }) {
     setDraftValue(value ?? "");
   }
 
-  function handleSave(field) {
-    const result = onSaveField({ field, value: draftValue });
+  async function handleSave(field) {
+    const result = await onSaveField({ field, value: draftValue });
     if (!result.ok) {
       setError(result.error || "Could not save field.");
       return;
@@ -186,6 +186,30 @@ export default function Profile({ user, onSaveField, goBack }) {
             draftValue={draftValue}
             setDraftValue={setDraftValue}
             setEditingField={(field) => (field ? startEdit(field, user?.weightKg ? String(user.weightKg) : "") : setEditingField(null))}
+            onSave={handleSave}
+          />
+
+          <ProfileRow
+            label="Target Steps"
+            field="targetSteps"
+            type="number"
+            value={Number.isFinite(user?.targetSteps) ? `${user.targetSteps}` : "10000"}
+            editingField={editingField}
+            draftValue={draftValue}
+            setDraftValue={setDraftValue}
+            setEditingField={(field) => (field ? startEdit(field, user?.targetSteps ? String(user.targetSteps) : "10000") : setEditingField(null))}
+            onSave={handleSave}
+          />
+
+          <ProfileRow
+            label="Daily Calories Target (kcal)"
+            field="caloriesTarget"
+            type="number"
+            value={Number.isFinite(user?.caloriesTarget) ? `${user.caloriesTarget}` : "2000"}
+            editingField={editingField}
+            draftValue={draftValue}
+            setDraftValue={setDraftValue}
+            setEditingField={(field) => (field ? startEdit(field, user?.caloriesTarget ? String(user.caloriesTarget) : "2000") : setEditingField(null))}
             onSave={handleSave}
           />
 
