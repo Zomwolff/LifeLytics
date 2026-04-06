@@ -31,7 +31,7 @@ class LLMService:
         else:
             llmLogger.warning("OPENROUTER_API_KEY not set - LLM features will be unavailable")
 
-    # ── insights ─────────────────────────────────────────────────────────────
+    # ── insights ──────────────────────────────────────────────────────────────
 
     async def generateInsights(self, structuredData: Dict[str, Any], userId: str = "unknown") -> Dict[str, Any]:
         allowed, stats = rateLimiter.isAllowed(f"insights_{userId}")
@@ -44,11 +44,9 @@ class LLMService:
                 llmStatus="failed", error="API key not configured"
             )
 
-        systemMsg = "You are a professional health analytics assistant. Respond ONLY with valid JSON, no additional text."
-        userMsg = self._buildInsightsPrompt(structuredData)
         messages = [
-            {"role": "system", "content": systemMsg},
-            {"role": "user", "content": userMsg},
+            {"role": "system", "content": "You are a professional health analytics assistant. Respond ONLY with valid JSON, no additional text."},
+            {"role": "user", "content": self._buildInsightsPrompt(structuredData)},
         ]
 
         with timeOperation(f"LLM insights for user {userId}") as timer:
@@ -63,24 +61,15 @@ class LLMService:
                 except asyncio.TimeoutError:
                     llmLogger.error(f"TIMEOUT: {model}")
                     if modelIndex == len(self.MODELS):
-                        return self._createRuleBasedResponse(
-                            structuredData, llmUsed=False, modelUsed=None,
-                            llmStatus="failed", error="All models timed out"
-                        )
+                        return self._createRuleBasedResponse(structuredData, llmUsed=False, modelUsed=None, llmStatus="failed", error="All models timed out")
                 except Exception as e:
                     llmLogger.error(f"ERROR with {model}: {e}")
                     if modelIndex == len(self.MODELS):
-                        return self._createRuleBasedResponse(
-                            structuredData, llmUsed=False, modelUsed=None,
-                            llmStatus="failed", error=str(e)
-                        )
+                        return self._createRuleBasedResponse(structuredData, llmUsed=False, modelUsed=None, llmStatus="failed", error=str(e))
 
-            return self._createRuleBasedResponse(
-                structuredData, llmUsed=False, modelUsed=None,
-                llmStatus="failed", error="All models returned empty responses"
-            )
+            return self._createRuleBasedResponse(structuredData, llmUsed=False, modelUsed=None, llmStatus="failed", error="All models returned empty responses")
 
-    # ── chat ─────────────────────────────────────────────────────────────────
+    # ── chat ──────────────────────────────────────────────────────────────────
 
     async def generateChatResponse(self, message: str, userContext: Dict[str, Any], userId: str = "unknown") -> Dict[str, Any]:
         allowed, stats = rateLimiter.isAllowed(f"chat_{userId}")
@@ -96,7 +85,7 @@ class LLMService:
             for modelIndex, model in enumerate(self.MODELS, 1):
                 llmLogger.info(f"Attempting chat model {modelIndex}/{len(self.MODELS)}: {model}")
                 try:
-                    result = await self._callLLM(messages, model)
+                    result = await self._callLLM(messages, model, temperature=0.45, maxTokens=700)
                     if result:
                         llmLogger.info(f"Chat response via {model} in {timer.elapsed:.2f}s")
                         return {"response": result, "llm_used": True, "model_used": model, "llm_status": "success"}
@@ -111,10 +100,16 @@ class LLMService:
 
             return {"response": self._mockChatResponse(message), "llm_used": False, "model_used": None, "llm_status": "failed", "error": "All models returned empty responses"}
 
-    # ── core HTTP call ────────────────────────────────────────────────────────
+    # ── core HTTP call ─────────────────────────────────────────────────────────
 
-    async def _callLLM(self, messages: List[Dict[str, str]], model: str, retryCount: int = 0) -> Optional[str]:
-        """Send a messages array directly to the LLM API."""
+    async def _callLLM(
+        self,
+        messages: List[Dict[str, str]],
+        model: str,
+        retryCount: int = 0,
+        temperature: float = 0.7,
+        maxTokens: int = 1500,
+    ) -> Optional[str]:
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
@@ -126,8 +121,8 @@ class LLMService:
                     json={
                         "model": model,
                         "messages": messages,
-                        "temperature": 0.7,
-                        "max_tokens": 1500,
+                        "temperature": temperature,
+                        "max_tokens": maxTokens,
                     },
                 )
 
@@ -138,7 +133,7 @@ class LLMService:
                 elif response.status_code == 429:
                     if retryCount < self.maxRetriesPerModel:
                         await asyncio.sleep((retryCount + 1) * 2)
-                        return await self._callLLM(messages, model, retryCount + 1)
+                        return await self._callLLM(messages, model, retryCount + 1, temperature, maxTokens)
                     return None
 
                 elif response.status_code == 401:
@@ -147,7 +142,7 @@ class LLMService:
 
                 elif response.status_code == 500 and retryCount < self.maxRetriesPerModel:
                     await asyncio.sleep(1)
-                    return await self._callLLM(messages, model, retryCount + 1)
+                    return await self._callLLM(messages, model, retryCount + 1, temperature, maxTokens)
 
                 else:
                     llmLogger.error(f"LLM API error {response.status_code}: {response.text}")
@@ -159,26 +154,30 @@ class LLMService:
             llmLogger.error(f"Error calling {model}: {e}")
             return None
 
-    # ── prompt builders ───────────────────────────────────────────────────────
+    # ── prompt builders ────────────────────────────────────────────────────────
 
     def _buildChatMessages(self, message: str, userContext: Dict[str, Any]) -> List[Dict[str, str]]:
-        """Build full messages array with system prompt, history, and current message."""
         metrics = userContext.get("metrics", {})
         prescriptionContext = userContext.get("prescriptionContext", "No report history.")
         chatHistory: List[Dict[str, str]] = userContext.get("chatHistory", [])
 
-        systemPrompt = f"""You are a professional health assistant chatbot for LifeLytics.
-Be conversational, accurate, and helpful. Reference the user's health data and report history when relevant.
-Always remind users to consult healthcare providers for medical advice.
+        systemPrompt = f"""You are LifeLytics, a supportive and practical health coach.
+Write in plain conversational English. Keep answers specific and useful.
+When user health metrics are available, reference them naturally.
+Always include 2-4 concrete next steps the user can do today.
+If symptoms could be serious, add a short safety line advising medical care.
+Avoid generic filler, avoid repeating the user message, and do not output JSON.
 
 USER HEALTH PROFILE:
 - Height: {metrics.get('height', 'N/A')} m
 - Weight: {metrics.get('weight', 'N/A')} kg
 - BMI: {metrics.get('bmi', 'N/A')}
-- Average Sleep: {metrics.get('avgSleep', 'N/A')} hours/day
-- Average Steps: {metrics.get('avgSteps', 'N/A')} steps/day
-- Average Glucose: {metrics.get('avgGlucose', 'N/A')} mg/dL
-- Average Heart Rate: {metrics.get('avgHeartRate', 'N/A')} bpm
+- Avg Sleep: {metrics.get('avgSleep', 'N/A')} h/day
+- Avg Steps: {metrics.get('avgSteps', 'N/A')} steps/day
+- Avg Glucose: {metrics.get('avgGlucose', 'N/A')} mg/dL
+- Avg Heart Rate: {metrics.get('avgHeartRate', 'N/A')} bpm
+- Avg Calories Intake: {metrics.get('avgCaloriesIntake', 'N/A')} kcal/day
+- Data Points: {metrics.get('dataPoints', 0)}
 
 PRESCRIPTION & REPORT HISTORY:
 {prescriptionContext}"""
@@ -186,15 +185,13 @@ PRESCRIPTION & REPORT HISTORY:
         messages = [{"role": "system", "content": systemPrompt}]
 
         # Inject real conversation history as actual message turns
-        for turn in chatHistory[-10:]:  # last 10 turns
+        for turn in chatHistory[-10:]:
             role = turn.get("role", "user")
             content = turn.get("content", "")
             if role in ("user", "assistant") and content:
                 messages.append({"role": role, "content": content})
 
-        # Add current user message
         messages.append({"role": "user", "content": message})
-
         return messages
 
     def _buildInsightsPrompt(self, data: Dict[str, Any]) -> str:
@@ -235,7 +232,7 @@ IMPORTANT: Respond ONLY with valid JSON. Use this exact structure:
 
 Ensure all fields are present and valid. No additional text outside JSON."""
 
-    # ── parsers & fallbacks ───────────────────────────────────────────────────
+    # ── parsers & fallbacks ────────────────────────────────────────────────────
 
     def _parseInsightsResponse(self, llmResponse: str, originalData: Dict[str, Any], model: str) -> Dict[str, Any]:
         try:
@@ -259,10 +256,7 @@ Ensure all fields are present and valid. No additional text outside JSON."""
             }
         except Exception as e:
             llmLogger.error(f"Failed to parse insights JSON from {model}: {e}")
-            return self._createRuleBasedResponse(
-                originalData, llmUsed=False, modelUsed=model,
-                llmStatus="failed", error=str(e)
-            )
+            return self._createRuleBasedResponse(originalData, llmUsed=False, modelUsed=model, llmStatus="failed", error=str(e))
 
     def _createRuleBasedResponse(self, data, llmUsed=False, modelUsed=None, llmStatus=None, error=None):
         response = {

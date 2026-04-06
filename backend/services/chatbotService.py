@@ -2,6 +2,7 @@
 
 from typing import Dict, Any, List
 import logging
+import json
 
 from backend.utils import firestore_db
 from backend.services.llmService import getLLMService
@@ -24,15 +25,16 @@ async def respond(message: str, userId: str) -> Dict[str, Any]:
                     "llm_status": "greeting",
                 }
 
-            # Load all context in parallel-ish
             user_profile = await firestore_db.getUserProfile(userId) or {}
             health_logs = await firestore_db.getHealthLogs(userId)
             glucose = await firestore_db.getCollectionDocs(userId, "glucose")
             smartwatch = await firestore_db.getCollectionDocs(userId, "smartwatch")
+            meals = await firestore_db.getCollectionDocs(userId, "meals")
+            trend_context = await firestore_db.getLatestTrendContext(userId) or {}
             chat_history = await firestore_db.getChatHistory(userId, limit=20)
             reports = await firestore_db.getReports(userId)
 
-            # Save user message first
+            # Save user message
             await firestore_db.saveChatMessage(userId, "user", message)
 
             userContext = {
@@ -40,6 +42,8 @@ async def respond(message: str, userId: str) -> Dict[str, Any]:
                 "health_logs": health_logs,
                 "glucose": glucose,
                 "smartwatch": smartwatch,
+                "meals": meals,
+                "trend_context": trend_context,
             }
 
             healthMetrics = _extractHealthMetrics(userContext)
@@ -69,7 +73,6 @@ async def respond(message: str, userId: str) -> Dict[str, Any]:
             responseText = _ensureChatResponse(llmResponse.get("response"), message)
             llmResponse["response"] = responseText
 
-            # Save assistant response
             await firestore_db.saveChatMessage(userId, "assistant", responseText)
 
             logger.info(f"Chat response for {userId} in {timer.elapsed:.2f}s")
@@ -88,16 +91,15 @@ async def respond(message: str, userId: str) -> Dict[str, Any]:
 
 
 def _buildPrescriptionContext(reports: List[Dict[str, Any]]) -> str:
-    """Build a text summary of prescription/report history for LLM context."""
     if not reports:
         return "No prescription or health report history available."
 
     lines = ["Recent health reports:"]
-    for i, report in enumerate(reports[:5]):  # last 5 reports
+    for i, report in enumerate(reports[:5]):
         status = report.get("status", "unknown")
         summary = report.get("summary", "")
         filename = report.get("filename", f"Report {i+1}")
-        timestamp = report.get("timestamp", "")[:10] if report.get("timestamp") else ""
+        timestamp = report.get("uploadedAt", "")[:10] if report.get("uploadedAt") else ""
         nutrients = report.get("nutrients", {})
         markers = report.get("metabolicMarkers", report.get("metabolic_markers", {}))
 
@@ -120,7 +122,6 @@ def _buildPrescriptionContext(reports: List[Dict[str, Any]]) -> str:
 
 
 def _buildHistoryContext(chat_history: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-    """Convert Firestore chat history to LLM message format."""
     messages = []
     for msg in chat_history:
         role = msg.get("role", "user")
@@ -131,21 +132,109 @@ def _buildHistoryContext(chat_history: List[Dict[str, Any]]) -> List[Dict[str, s
 
 
 def _extractHealthMetrics(userContext: Dict[str, Any]) -> Dict[str, Any]:
-    height = userContext.get("height", 0)
-    weight = userContext.get("weight", 0)
-    bmi = None
-    if height and weight and height > 0:
-        bmi = round(weight / (height * height), 1)
+    height_cm = _to_number(userContext.get("heightCm"), 0)
+    height = _to_number(userContext.get("height"), 0)
+    if height_cm > 0:
+        height = round(height_cm / 100.0, 4)
+
+    weight = _to_number(userContext.get("weightKg"), 0)
+    if weight <= 0:
+        weight = _to_number(userContext.get("weight"), 0)
+
+    bmi = round(weight / (height * height), 1) if height > 0 and weight > 0 else None
+
+    trend_context = userContext.get("trend_context") or {}
+    trend_sleep = _numeric_series(trend_context.get("sleep") or trend_context.get("weeklySleep"))
+    trend_steps = _numeric_series(trend_context.get("steps") or trend_context.get("weeklySteps"))
+    trend_glucose = _numeric_series(trend_context.get("glucose") or trend_context.get("weeklyBloodGlucose"))
+    trend_heart = _numeric_series(trend_context.get("heart_rate") or trend_context.get("weeklyHeartRate"))
+
+    smartwatch = userContext.get("smartwatch") or []
+    health_logs = userContext.get("health_logs") or []
+    glucose_rows = userContext.get("glucose") or []
+    meals = userContext.get("meals") or []
+
+    sleep_values = [
+        max(_to_number(row.get("sleepDuration"), 0), _to_number(row.get("sleep"), 0))
+        for row in [*smartwatch, *health_logs]
+        if max(_to_number(row.get("sleepDuration"), 0), _to_number(row.get("sleep"), 0)) > 0
+    ] or trend_sleep
+
+    steps_values = [
+        max(_to_number(row.get("steps"), 0), _to_number(row.get("stepCount"), 0))
+        for row in [*smartwatch, *health_logs]
+        if max(_to_number(row.get("steps"), 0), _to_number(row.get("stepCount"), 0)) > 0
+    ] or trend_steps
+
+    glucose_values = [
+        v for v in [
+            *[_pick_first_number(row, ["glucoseLevel", "value", "glucose"]) for row in glucose_rows],
+            *[_pick_first_number(row, ["glucose", "glucoseLevel", "value"]) for row in health_logs],
+        ] if v > 0
+    ] or trend_glucose
+
+    heart_rate_values = [
+        v for v in [
+            *[_pick_first_number(row, ["heartRate", "avgHeartRate"]) for row in smartwatch],
+            *[_pick_first_number(row, ["heartRate", "avgHeartRate"]) for row in health_logs],
+        ] if v > 0
+    ] or trend_heart
+
+    calories_values = [
+        v for v in [_pick_first_number(row, ["calories"]) for row in meals] if v > 0
+    ]
+
     return {
         "height": height,
         "weight": weight,
         "bmi": bmi,
-        "avgSleep": 0,
-        "avgSteps": 0,
-        "avgGlucose": 0,
-        "avgHeartRate": 0,
-        "dataPoints": len(userContext.get("health_logs", [])),
+        "avgSleep": _average(sleep_values),
+        "avgSteps": int(round(_average(steps_values))) if steps_values else 0,
+        "avgGlucose": _average(glucose_values),
+        "avgHeartRate": _average(heart_rate_values),
+        "avgCaloriesIntake": _average(calories_values),
+        "dataPoints": len(health_logs) + len(glucose_rows) + len(smartwatch) + len(meals),
     }
+
+
+def _to_number(value: Any, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        chunk = ""
+        for char in value.strip():
+            if char.isdigit() or char == ".":
+                chunk += char
+            elif chunk:
+                break
+        if chunk:
+            try:
+                return float(chunk)
+            except ValueError:
+                return default
+    return default
+
+
+def _pick_first_number(row: Dict[str, Any], keys: List[str], default: float = 0.0) -> float:
+    for key in keys:
+        value = _to_number(row.get(key), 0.0)
+        if value > 0:
+            return value
+    return default
+
+
+def _numeric_series(values: Any) -> List[float]:
+    if not isinstance(values, list):
+        return []
+    return [p for p in [_to_number(v, 0.0) for v in values] if p > 0]
+
+
+def _average(values: List[float]) -> float:
+    if not values:
+        return 0.0
+    return round(sum(values) / len(values), 2)
 
 
 def _mockChatFallback(message: str) -> str:
@@ -185,6 +274,21 @@ async def _buildGreetingResponse(userId: str) -> str:
 def _ensureChatResponse(response: Any, message: str) -> str:
     if isinstance(response, str):
         cleaned = response.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.strip("`").strip()
+            if cleaned.lower().startswith("json"):
+                cleaned = cleaned[4:].strip()
+
+        if cleaned.startswith("{") and cleaned.endswith("}"):
+            try:
+                parsed = json.loads(cleaned)
+                for key in ["response", "answer", "message", "content", "text"]:
+                    candidate = parsed.get(key)
+                    if isinstance(candidate, str) and candidate.strip():
+                        return candidate.strip()
+            except Exception:
+                pass
+
         if cleaned:
             return cleaned
     return _mockChatFallback(message)
