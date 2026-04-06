@@ -6,10 +6,16 @@ Endpoints:
 - GET /nutrition/meals - Fetch meals for a specific date
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional, List
 import re
+import os
+import httpx
+import csv
+import json
+import base64
+from pathlib import Path
 
 from backend.utils import auth
 from backend.utils.datetime_ist import now_ist, today_ist
@@ -17,6 +23,9 @@ from backend.utils.firebase import getFirestoreClient
 from backend.services import llmService as llm
 
 router = APIRouter()
+
+_NUTRITION_DATA_CACHE: list[dict] = []
+_NUTRITION_DATA_CACHE_SIGNATURE: Optional[str] = None
 
 
 class FoodAnalysisRequest(BaseModel):
@@ -58,8 +67,932 @@ class FetchMealsRequest(BaseModel):
     date: str
 
 
+class ImageFoodConfirmRequest(BaseModel):
+    foodName: str
+    servingGrams: Optional[float] = 100
+
+
+def _extract_first_number(value) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        match = re.search(r"([\d.]+)", value)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                return 0.0
+    return 0.0
+
+
+def _normalize_nutrition_payload(raw: dict) -> dict:
+    return {
+        "name": raw.get("name", "food item"),
+        "servingSize": raw.get("servingSize", "100g"),
+        "calories": str(raw.get("calories", "0")),
+        "protein": str(raw.get("protein", "0g")),
+        "totalFat": str(raw.get("totalFat", "0g")),
+        "saturatedFat": str(raw.get("saturatedFat", "0g")),
+        "cholesterol": str(raw.get("cholesterol", "0mg")),
+        "sodium": str(raw.get("sodium", "0mg")),
+        "carbohydrates": str(raw.get("carbohydrates", "0g")),
+        "fiber": str(raw.get("fiber", "0g")),
+        "sugars": str(raw.get("sugars", "0g")),
+    }
+
+
+def _normalized_text(value: str) -> str:
+    text = (value or "").lower().strip()
+    # Normalize separators so "low-fat" and "low fat" are treated equally.
+    text = re.sub(r"[-_/]+", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
+def _extract_serving_grams(value: str) -> Optional[float]:
+    if not value:
+        return None
+    match = re.search(r"([\d.]+)\s*(g|gram|grams)?", str(value).lower())
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
+def _extract_field(row: dict, aliases: list[str], default: str = ""):
+    for alias in aliases:
+        normalized_alias = _normalize_key(alias)
+        if normalized_alias in row and str(row[normalized_alias]).strip() != "":
+            return row[normalized_alias]
+    return default
+
+
+def _normalize_key(value: str) -> str:
+    key = str(value or "").strip().lower()
+    key = re.sub(r"[^a-z0-9]+", "_", key)
+    key = re.sub(r"_+", "_", key).strip("_")
+    return key
+
+
+def _resolve_nutrition_data_paths() -> list[Path]:
+    configured = os.getenv("NUTRITION_DATA_PATH", "").strip()
+    paths: list[Path] = []
+
+    if configured:
+        # Support one or many dataset paths separated by semicolon/comma.
+        raw_paths = [part.strip() for part in re.split(r"[;,]", configured) if part.strip()]
+        for raw_path in raw_paths:
+            candidate = Path(raw_path)
+            if candidate.exists() and candidate.is_file() and candidate.suffix.lower() in {".csv", ".tsv", ".json"}:
+                paths.append(candidate)
+        return paths
+
+    project_root = Path(__file__).resolve().parents[2]
+    data_dir = project_root / "backend" / "data"
+    if not data_dir.exists():
+        return []
+
+    excluded = {
+        "epi_r.csv",
+        "full_format_recipes.json",
+    }
+
+    for file_path in sorted(data_dir.iterdir(), key=lambda p: p.name.lower()):
+        if not file_path.is_file() or file_path.name in excluded:
+            continue
+        if file_path.suffix.lower() in {".csv", ".tsv", ".json"}:
+            paths.append(file_path)
+
+    return paths
+
+
+def _parse_nutrition_rows(rows: list[dict]) -> list[dict]:
+    parsed: list[dict] = []
+    for row in rows:
+        normalized_row = {_normalize_key(key): value for key, value in row.items()}
+
+        name = str(_extract_field(normalized_row, ["name", "food", "food_name", "food_item", "item", "product_name", "dish_name", "description", "title"], "")).strip()
+        if not name:
+            continue
+
+        serving_size = str(_extract_field(normalized_row, ["servingSize", "serving_size", "serving", "serving_g", "serving_unit", "serving_amount"], "100g"))
+        if serving_size.isdigit():
+            serving_size = f"{serving_size}g"
+
+        # Prefer kcal-like columns first; if only kJ is present (common in OpenFoodFacts), convert to kcal.
+        calories_value = _extract_first_number(
+            _extract_field(
+                normalized_row,
+                ["calories", "kcal", "energy", "calories_kcal", "energy_kcal_100g", "energy_kcal"],
+                "0",
+            )
+        )
+        if calories_value <= 0:
+            kj_value = _extract_first_number(
+                _extract_field(normalized_row, ["energy_kj_100g", "energy_100g"], "0")
+            )
+            if kj_value > 0:
+                calories_value = kj_value / 4.184
+
+        calories = f"{calories_value:.1f}"
+        protein = str(_extract_field(normalized_row, ["protein", "protein_g", "proteins_100g", "protein_g_", "protein_gm"], "0g"))
+        total_fat = str(_extract_field(normalized_row, ["totalFat", "fat", "fat_g", "fats_g", "fat_100g", "total_fat"], "0g"))
+        saturated_fat = str(_extract_field(normalized_row, ["saturatedFat", "sat_fat", "sat_fat_g", "saturated_fat_100g", "saturated_fat"], "0g"))
+        cholesterol = str(_extract_field(normalized_row, ["cholesterol", "cholesterol_mg", "cholesterol_100g"], "0mg"))
+        sodium = str(_extract_field(normalized_row, ["sodium", "sodium_mg", "sodium_100g"], "0mg"))
+        carbohydrates = str(_extract_field(normalized_row, ["carbohydrates", "carbs", "carbs_g", "carbohydrates_g", "carbohydrates_100g"], "0g"))
+        fiber = str(_extract_field(normalized_row, ["fiber", "fiber_g", "fibre_g", "fiber_100g", "fibre_100g"], "0g"))
+        sugars = str(_extract_field(normalized_row, ["sugars", "sugar", "sugar_g", "free_sugar_g", "sugars_100g"], "0g"))
+
+        # Skip rows without meaningful nutrition values.
+        nutrition_signal = (
+            _extract_first_number(calories)
+            + _extract_first_number(protein)
+            + _extract_first_number(total_fat)
+            + _extract_first_number(carbohydrates)
+        )
+        if nutrition_signal <= 0:
+            continue
+
+        parsed.append(
+            {
+                "name": name,
+                "nameNormalized": _normalized_text(name),
+                "servingSize": serving_size,
+                "calories": calories,
+                "protein": protein,
+                "totalFat": total_fat,
+                "saturatedFat": saturated_fat,
+                "cholesterol": cholesterol,
+                "sodium": sodium,
+                "carbohydrates": carbohydrates,
+                "fiber": fiber,
+                "sugars": sugars,
+            }
+        )
+    return parsed
+
+
+def _load_external_nutrition_data() -> list[dict]:
+    global _NUTRITION_DATA_CACHE, _NUTRITION_DATA_CACHE_SIGNATURE
+
+    paths = _resolve_nutrition_data_paths()
+    if not paths:
+        _NUTRITION_DATA_CACHE = []
+        _NUTRITION_DATA_CACHE_SIGNATURE = None
+        return []
+
+    signature = "|".join(f"{path}:{path.stat().st_mtime}" for path in paths)
+    if _NUTRITION_DATA_CACHE_SIGNATURE == signature:
+        return _NUTRITION_DATA_CACHE
+
+    all_rows: list[dict] = []
+    for path in paths:
+        rows: list[dict] = []
+        suffix = path.suffix.lower()
+        if suffix == ".csv":
+            with path.open("r", encoding="utf-8", errors="ignore") as file:
+                reader = csv.DictReader(file)
+                rows = [dict(row) for row in reader]
+        elif suffix == ".tsv":
+            with path.open("r", encoding="utf-8", errors="ignore") as file:
+                reader = csv.DictReader(file, delimiter="\t")
+                rows = [dict(row) for row in reader]
+        elif suffix == ".json":
+            with path.open("r", encoding="utf-8", errors="ignore") as file:
+                raw = json.load(file)
+                if isinstance(raw, dict):
+                    rows = list(raw.get("items") or raw.get("foods") or [])
+                elif isinstance(raw, list):
+                    rows = raw
+        all_rows.extend(rows)
+
+    parsed_rows = _parse_nutrition_rows(all_rows)
+
+    # Deduplicate by normalized name, preferring rows with richer nutrition signal.
+    dedup: dict[str, dict] = {}
+    for row in parsed_rows:
+        key = row.get("nameNormalized", "")
+        if not key:
+            continue
+        current_signal = (
+            _extract_first_number(row.get("calories", 0))
+            + _extract_first_number(row.get("protein", 0))
+            + _extract_first_number(row.get("totalFat", 0))
+            + _extract_first_number(row.get("carbohydrates", 0))
+        )
+
+        existing = dedup.get(key)
+        if not existing:
+            dedup[key] = row
+            continue
+
+        existing_signal = (
+            _extract_first_number(existing.get("calories", 0))
+            + _extract_first_number(existing.get("protein", 0))
+            + _extract_first_number(existing.get("totalFat", 0))
+            + _extract_first_number(existing.get("carbohydrates", 0))
+        )
+
+        if current_signal > existing_signal:
+            dedup[key] = row
+
+    _NUTRITION_DATA_CACHE = list(dedup.values())
+    _NUTRITION_DATA_CACHE_SIGNATURE = signature
+    return _NUTRITION_DATA_CACHE
+
+
+def _lookup_external_nutrition(description: str, serving_size: float) -> Optional[dict]:
+    dataset = _load_external_nutrition_data()
+    if not dataset:
+        return None
+
+    normalized_desc = _normalized_text(description)
+    desc_tokens = set(normalized_desc.split())
+
+    best_item: Optional[dict] = None
+    best_score = -1.0
+
+    for item in dataset:
+        item_name = item.get("nameNormalized", "")
+        if not item_name:
+            continue
+
+        item_tokens = [token for token in item_name.split() if token]
+        if not item_tokens:
+            continue
+
+        matched = sum(1 for token in item_tokens if token in desc_tokens)
+        substring_match = item_name in normalized_desc
+        all_tokens_present = matched == len(item_tokens)
+
+        score = 0.0
+        if substring_match:
+            score += 3.0
+        if all_tokens_present:
+            score += 2.0
+        score += matched / len(item_tokens)
+        score += min(len(item_name), 40) / 200.0
+
+        if score > best_score and (substring_match or matched > 0):
+            best_score = score
+            best_item = item
+
+    if not best_item:
+        return None
+
+    base_serving = _extract_serving_grams(best_item.get("servingSize", "")) or 100.0
+    scale_factor = (serving_size / base_serving) * 100.0
+    scaled = scaleMealNutrients(
+        {
+            "name": best_item.get("name", "food item"),
+            "servingSize": f"{base_serving:.0f}g",
+            "calories": best_item.get("calories", "0"),
+            "protein": best_item.get("protein", "0g"),
+            "totalFat": best_item.get("totalFat", "0g"),
+            "saturatedFat": best_item.get("saturatedFat", "0g"),
+            "cholesterol": best_item.get("cholesterol", "0mg"),
+            "sodium": best_item.get("sodium", "0mg"),
+            "carbohydrates": best_item.get("carbohydrates", "0g"),
+            "fiber": best_item.get("fiber", "0g"),
+            "sugars": best_item.get("sugars", "0g"),
+        },
+        max(scale_factor, 1.0),
+    )
+    return scaled
+
+
+def _select_best_fallback_food(description: str) -> Optional[dict]:
+    """Evaluate all fallback candidates and pick the best full-input match."""
+    normalized_desc = _normalized_text(description)
+    desc_tokens = set(normalized_desc.split())
+    best_item = None
+    best_score = -1.0
+
+    for keyword, food_data in FOOD_DATABASE.items():
+        normalized_key = _normalized_text(keyword)
+        key_tokens = [token for token in normalized_key.split() if token]
+        if not key_tokens:
+            continue
+
+        # Score each candidate by how well it matches the whole phrase.
+        matched_tokens = sum(1 for token in key_tokens if token in desc_tokens)
+        all_tokens_present = matched_tokens == len(key_tokens)
+        substring_match = normalized_key in normalized_desc
+
+        score = 0.0
+        if substring_match:
+            score += 3.0
+        if all_tokens_present:
+            score += 2.0
+
+        # Token coverage rewards specific candidates when whole phrase is present.
+        score += (matched_tokens / len(key_tokens))
+
+        # Slightly prefer longer/more specific keys on ties.
+        score += min(len(normalized_key), 40) / 200.0
+
+        if score > best_score and (substring_match or matched_tokens > 0):
+            best_score = score
+            best_item = food_data.copy()
+
+    return best_item
+
+
+def _fallback_candidates_from_text(seed: str) -> List[dict]:
+    token = (seed or "").lower()
+    matches = []
+    for key, item in FOOD_DATABASE.items():
+        if key in token:
+            matches.append({"name": item["name"], "confidence": 0.72})
+    if matches:
+        return matches[:3]
+    return []
+
+
+_DETECTION_BLOCKLIST = {
+    "food",
+    "dish",
+    "meal",
+    "plate",
+    "snack",
+    "ingredient",
+    "lunch",
+    "dinner",
+    "breakfast",
+    "cuisine",
+    "recipe",
+}
+
+
+def _sanitize_detected_label(value: str) -> str:
+    label = _normalized_text(value or "")
+    label = re.sub(r"[^a-z0-9\s]", " ", label)
+    label = re.sub(r"\s+", " ", label).strip()
+    if not label:
+        return ""
+
+    tokens = [token for token in label.split(" ") if token]
+    if not tokens:
+        return ""
+
+    # Reject generic non-food labels from vision APIs.
+    if len(tokens) == 1 and tokens[0] in _DETECTION_BLOCKLIST:
+        return ""
+
+    if any(token in _DETECTION_BLOCKLIST for token in tokens) and len(tokens) <= 2:
+        return ""
+
+    return " ".join(tokens)
+
+
+async def _build_detection_preview(food_name: str, serving_grams: float = 100.0) -> Optional[dict]:
+    external = _lookup_external_nutrition(food_name, serving_grams)
+    if external:
+        return external
+
+    resolved = await _resolve_nutrition_with_providers(food_name, serving_grams)
+    if resolved:
+        return resolved
+
+    fallback = _select_best_fallback_food(food_name)
+    if fallback:
+        return scaleMealNutrients(fallback, serving_grams)
+
+    return None
+
+
+async def _detect_with_logmeal(file: UploadFile, image_bytes: bytes) -> List[dict]:
+    api_key = os.getenv("LOGMEAL_API_KEY")
+    if not api_key:
+        return []
+
+    endpoints = [
+        "https://api.logmeal.com/v2/image/recognition/complete",
+        "https://api.logmeal.com/v2/image/segmentation/complete",
+    ]
+
+    merged_candidates: dict[str, float] = {}
+
+    for endpoint in endpoints:
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                response = await client.post(
+                    endpoint,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    files={"image": (file.filename or "meal.jpg", image_bytes, file.content_type or "image/jpeg")},
+                )
+
+            if response.status_code != 200:
+                continue
+
+            payload = response.json()
+            items = payload.get("recognition_results") or payload.get("segmentation_results") or []
+            for item in items:
+                name = item.get("name") or item.get("foodName") or item.get("label")
+                if not name:
+                    continue
+                confidence = _extract_first_number(item.get("prob") or item.get("confidence") or 0)
+                if confidence > 1:
+                    confidence = confidence / 100.0
+
+                normalized_name = _sanitize_detected_label(str(name))
+                if normalized_name:
+                    merged_candidates[normalized_name] = max(merged_candidates.get(normalized_name, 0.0), float(confidence))
+
+            # Add optional dish-level predictions when available.
+            for key in ["foodFamily", "dishName", "best_match"]:
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    normalized_name = _sanitize_detected_label(value)
+                    merged_candidates[normalized_name] = max(merged_candidates.get(normalized_name, 0.0), 0.5)
+        except Exception:
+            continue
+
+    if not merged_candidates:
+        return []
+
+    ranked = sorted(merged_candidates.items(), key=lambda pair: pair[1], reverse=True)
+    if not ranked:
+        return []
+
+    # Keep only strong labels so users don't get noisy/random options.
+    top_score = ranked[0][1]
+    if top_score < 0.45:
+        return []
+
+    min_score = max(0.58, top_score - 0.12)
+    filtered = [(name, score) for name, score in ranked if score >= min_score]
+
+    if len(filtered) >= 2 and (filtered[0][1] - filtered[1][1]) >= 0.22:
+        filtered = [filtered[0]]
+
+    return [
+        {"name": name.title(), "confidence": round(score, 2)}
+        for name, score in filtered[:3]
+    ]
+
+
+def _extract_json_object(text: str) -> Optional[dict]:
+    if not isinstance(text, str):
+        return None
+
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"```$", "", cleaned).strip()
+
+    try:
+        parsed = json.loads(cleaned)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
+
+    match = re.search(r"\{[\s\S]*\}", cleaned)
+    if not match:
+        return None
+
+    try:
+        parsed = json.loads(match.group(0))
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+async def _detect_with_groq_vision(file: UploadFile, image_bytes: bytes) -> List[dict]:
+    api_key = os.getenv("GROQ_API_KEY", "").strip()
+    if not api_key:
+        return []
+
+    model = os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+    mime = file.content_type or "image/jpeg"
+    image_b64 = base64.b64encode(image_bytes).decode("ascii")
+    image_url = f"data:{mime};base64,{image_b64}"
+
+    prompt_text = """You are an AI nutrition assistant.
+
+Your task is to analyze a food image and identify:
+1. All visible food items
+2. Estimated quantity of each item (in grams or standard units like pieces, cups, slices)
+3. Confidence level for each prediction (low / medium / high)
+
+Guidelines:
+- Be precise but realistic — estimates are acceptable.
+- If multiple items are mixed (e.g., curry), break them down if possible.
+- If unsure, make a best guess and mark confidence as low.
+- Ignore non-food objects (plates, spoons, background items).
+- Use common household portion sizes when exact measurement is unclear.
+
+Output format (STRICT JSON):
+{
+  "foods": [
+    {
+      "name": "food item name",
+      "quantity": number,
+      "unit": "g / ml / pieces / cups",
+      "confidence": "low / medium / high"
+    }
+  ]
+}"""
+
+    def confidence_to_score(value) -> float:
+        if isinstance(value, str):
+            label = value.strip().lower()
+            if label == "high":
+                return 0.9
+            if label == "medium":
+                return 0.65
+            if label == "low":
+                return 0.45
+
+        numeric = _extract_first_number(value)
+        if numeric > 1:
+            numeric = numeric / 100.0
+        return max(0.0, min(1.0, float(numeric)))
+
+    try:
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "temperature": 0.1,
+                    "max_tokens": 300,
+                    "messages": [
+                        {"role": "system", "content": "Follow the user prompt exactly and return strict JSON only."},
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt_text},
+                                {"type": "image_url", "image_url": {"url": image_url}},
+                            ],
+                        },
+                    ],
+                },
+            )
+
+        if response.status_code != 200:
+            return []
+
+        payload = response.json()
+        content = ((payload.get("choices") or [{}])[0].get("message") or {}).get("content")
+        parsed = _extract_json_object(content)
+        if not parsed:
+            return []
+
+        items = parsed.get("foods") or []
+        merged: dict[str, float] = {}
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            raw_name = item.get("name")
+            normalized = _sanitize_detected_label(str(raw_name or ""))
+            if not normalized:
+                continue
+            confidence = confidence_to_score(item.get("confidence"))
+            quantity = _extract_first_number(item.get("quantity"))
+            unit = str(item.get("unit") or "").strip().lower()
+
+            # Prefer entries with plausible quantity detail when confidence ties.
+            if quantity > 0 and unit in {"g", "gram", "grams", "ml", "pieces", "piece", "cups", "cup", "slices", "slice"}:
+                confidence = min(1.0, confidence + 0.03)
+
+            merged[normalized] = max(merged.get(normalized, 0.0), confidence)
+
+        if not merged:
+            return []
+
+        ranked = sorted(merged.items(), key=lambda pair: pair[1], reverse=True)
+        top_score = ranked[0][1]
+        if top_score < 0.45:
+            return []
+
+        min_score = max(0.58, top_score - 0.12)
+        filtered = [(name, score) for name, score in ranked if score >= min_score]
+        if len(filtered) >= 2 and (filtered[0][1] - filtered[1][1]) >= 0.22:
+            filtered = [filtered[0]]
+
+        return [
+            {"name": name.title(), "confidence": round(score, 2)}
+            for name, score in filtered[:3]
+        ]
+    except Exception:
+        return []
+
+
+async def _resolve_with_nutritionix(food_name: str, serving_grams: float) -> Optional[dict]:
+    app_id = os.getenv("NUTRITIONIX_APP_ID")
+    app_key = os.getenv("NUTRITIONIX_API_KEY")
+    if not app_id or not app_key:
+        return None
+
+    try:
+        query = f"{int(max(serving_grams, 1))}g {food_name}"
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.post(
+                "https://trackapi.nutritionix.com/v2/natural/nutrients",
+                headers={
+                    "x-app-id": app_id,
+                    "x-app-key": app_key,
+                    "Content-Type": "application/json",
+                },
+                json={"query": query},
+            )
+        if response.status_code != 200:
+            return None
+
+        payload = response.json()
+        foods = payload.get("foods") or []
+        if not foods:
+            return None
+        item = foods[0]
+        return _normalize_nutrition_payload({
+            "name": item.get("food_name", food_name),
+            "servingSize": f"{int(max(serving_grams, 1))}g",
+            "calories": round(_extract_first_number(item.get("nf_calories")), 1),
+            "protein": f"{_extract_first_number(item.get('nf_protein')):.1f}g",
+            "totalFat": f"{_extract_first_number(item.get('nf_total_fat')):.1f}g",
+            "saturatedFat": f"{_extract_first_number(item.get('nf_saturated_fat')):.1f}g",
+            "cholesterol": f"{_extract_first_number(item.get('nf_cholesterol')):.0f}mg",
+            "sodium": f"{_extract_first_number(item.get('nf_sodium')):.0f}mg",
+            "carbohydrates": f"{_extract_first_number(item.get('nf_total_carbohydrate')):.1f}g",
+            "fiber": f"{_extract_first_number(item.get('nf_dietary_fiber')):.1f}g",
+            "sugars": f"{_extract_first_number(item.get('nf_sugars')):.1f}g",
+        })
+    except Exception:
+        return None
+
+
+async def _resolve_with_openfoodfacts(food_name: str, serving_grams: float) -> Optional[dict]:
+    """Free, no-key nutrition lookup using OpenFoodFacts."""
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(
+                "https://world.openfoodfacts.org/cgi/search.pl",
+                params={
+                    "search_terms": food_name,
+                    "search_simple": 1,
+                    "action": "process",
+                    "json": 1,
+                    "page_size": 1,
+                },
+            )
+
+        if response.status_code != 200:
+            return None
+
+        payload = response.json()
+        products = payload.get("products") or []
+        if not products:
+            return None
+
+        product = products[0]
+        nutriments = product.get("nutriments") or {}
+        scale = max(serving_grams, 1.0) / 100.0
+
+        kcal_per_100g = _extract_first_number(
+            nutriments.get("energy-kcal_100g")
+            or nutriments.get("energy-kcal")
+            or 0
+        )
+        if kcal_per_100g <= 0:
+            # OFF often stores kJ only; convert to kcal.
+            kj_per_100g = _extract_first_number(nutriments.get("energy-kj_100g") or nutriments.get("energy_100g") or 0)
+            kcal_per_100g = kj_per_100g / 4.184 if kj_per_100g > 0 else 0
+
+        sodium_raw = _extract_first_number(nutriments.get("sodium_100g") or 0)
+        if sodium_raw <= 0:
+            salt_raw = _extract_first_number(nutriments.get("salt_100g") or 0)
+            sodium_raw = salt_raw * 0.393 if salt_raw > 0 else 0
+
+        nutrition = {
+            "name": product.get("product_name") or food_name,
+            "servingSize": f"{int(max(serving_grams, 1))}g",
+            "calories": round(kcal_per_100g * scale, 1),
+            "protein": f"{_extract_first_number(nutriments.get('proteins_100g') or 0) * scale:.1f}g",
+            "totalFat": f"{_extract_first_number(nutriments.get('fat_100g') or 0) * scale:.1f}g",
+            "saturatedFat": f"{_extract_first_number(nutriments.get('saturated-fat_100g') or 0) * scale:.1f}g",
+            "cholesterol": "0mg",
+            "sodium": f"{(sodium_raw * 1000 * scale):.0f}mg",
+            "carbohydrates": f"{_extract_first_number(nutriments.get('carbohydrates_100g') or 0) * scale:.1f}g",
+            "fiber": f"{_extract_first_number(nutriments.get('fiber_100g') or 0) * scale:.1f}g",
+            "sugars": f"{_extract_first_number(nutriments.get('sugars_100g') or 0) * scale:.1f}g",
+        }
+
+        if _extract_first_number(nutrition["calories"]) <= 0:
+            return None
+
+        return _normalize_nutrition_payload(nutrition)
+    except Exception:
+        return None
+
+
+async def _resolve_with_usda(food_name: str, serving_grams: float) -> Optional[dict]:
+    """USDA FoodData Central (free API key required)."""
+    api_key = os.getenv("USDA_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(
+                "https://api.nal.usda.gov/fdc/v1/foods/search",
+                params={
+                    "api_key": api_key,
+                    "query": food_name,
+                    "pageSize": 1,
+                },
+            )
+
+        if response.status_code != 200:
+            return None
+
+        payload = response.json()
+        foods = payload.get("foods") or []
+        if not foods:
+            return None
+
+        food = foods[0]
+        nutrients = food.get("foodNutrients") or []
+
+        def nutrient_value(names: list[str]) -> float:
+            names_lower = {name.lower() for name in names}
+            for nutrient in nutrients:
+                name = str(nutrient.get("nutrientName") or "").lower()
+                if name in names_lower:
+                    return _extract_first_number(nutrient.get("value"))
+            return 0.0
+
+        scale = max(serving_grams, 1.0) / 100.0
+        nutrition = {
+            "name": food.get("description") or food_name,
+            "servingSize": f"{int(max(serving_grams, 1))}g",
+            "calories": round(nutrient_value(["energy"]) * scale, 1),
+            "protein": f"{nutrient_value(['protein']) * scale:.1f}g",
+            "totalFat": f"{nutrient_value(['total lipid (fat)', 'fat']) * scale:.1f}g",
+            "saturatedFat": f"{nutrient_value(['fatty acids, total saturated']) * scale:.1f}g",
+            "cholesterol": f"{nutrient_value(['cholesterol']) * scale:.0f}mg",
+            "sodium": f"{nutrient_value(['sodium, na']) * scale:.0f}mg",
+            "carbohydrates": f"{nutrient_value(['carbohydrate, by difference']) * scale:.1f}g",
+            "fiber": f"{nutrient_value(['fiber, total dietary']) * scale:.1f}g",
+            "sugars": f"{nutrient_value(['sugars, total including nlea']) * scale:.1f}g",
+        }
+
+        if _extract_first_number(nutrition["calories"]) <= 0:
+            return None
+
+        return _normalize_nutrition_payload(nutrition)
+    except Exception:
+        return None
+
+
+async def _resolve_with_edamam(food_name: str, serving_grams: float) -> Optional[dict]:
+    app_id = os.getenv("EDAMAM_APP_ID")
+    app_key = os.getenv("EDAMAM_APP_KEY")
+    if not app_id or not app_key:
+        return None
+
+    try:
+        query = f"{int(max(serving_grams, 1))} grams {food_name}"
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(
+                "https://api.edamam.com/api/nutrition-data",
+                params={
+                    "app_id": app_id,
+                    "app_key": app_key,
+                    "ingr": query,
+                },
+            )
+        if response.status_code != 200:
+            return None
+
+        payload = response.json()
+        total = payload.get("totalNutrients", {})
+        return _normalize_nutrition_payload({
+            "name": food_name,
+            "servingSize": f"{int(max(serving_grams, 1))}g",
+            "calories": round(_extract_first_number(payload.get("calories")), 1),
+            "protein": f"{_extract_first_number((total.get('PROCNT') or {}).get('quantity')):.1f}g",
+            "totalFat": f"{_extract_first_number((total.get('FAT') or {}).get('quantity')):.1f}g",
+            "saturatedFat": f"{_extract_first_number((total.get('FASAT') or {}).get('quantity')):.1f}g",
+            "cholesterol": f"{_extract_first_number((total.get('CHOLE') or {}).get('quantity')):.0f}mg",
+            "sodium": f"{_extract_first_number((total.get('NA') or {}).get('quantity')):.0f}mg",
+            "carbohydrates": f"{_extract_first_number((total.get('CHOCDF') or {}).get('quantity')):.1f}g",
+            "fiber": f"{_extract_first_number((total.get('FIBTG') or {}).get('quantity')):.1f}g",
+            "sugars": f"{_extract_first_number((total.get('SUGAR') or {}).get('quantity')):.1f}g",
+        })
+    except Exception:
+        return None
+
+
+async def _resolve_nutrition_with_providers(food_name: str, serving_grams: float) -> Optional[dict]:
+    openfoodfacts_result = await _resolve_with_openfoodfacts(food_name, serving_grams)
+    if openfoodfacts_result:
+        return openfoodfacts_result
+
+    usda_result = await _resolve_with_usda(food_name, serving_grams)
+    if usda_result:
+        return usda_result
+
+    edamam_result = await _resolve_with_edamam(food_name, serving_grams)
+    if edamam_result:
+        return edamam_result
+
+    nutritionix_result = await _resolve_with_nutritionix(food_name, serving_grams)
+    if nutritionix_result:
+        return nutritionix_result
+
+    return None
+
+
 # Mock food database for quick lookups
 FOOD_DATABASE = {
+    "deep fried chicken": {
+        "name": "deep fried chicken",
+        "servingSize": "100g",
+        "calories": "295",
+        "protein": "24g",
+        "totalFat": "20g",
+        "saturatedFat": "5.4g",
+        "cholesterol": "95mg",
+        "sodium": "420mg",
+        "carbohydrates": "7g",
+        "fiber": "0g",
+        "sugars": "0g",
+    },
+    "fried chicken": {
+        "name": "fried chicken",
+        "servingSize": "100g",
+        "calories": "285",
+        "protein": "24g",
+        "totalFat": "18g",
+        "saturatedFat": "4.9g",
+        "cholesterol": "92mg",
+        "sodium": "390mg",
+        "carbohydrates": "7g",
+        "fiber": "0g",
+        "sugars": "0g",
+    },
+    "chicken fry": {
+        "name": "fried chicken",
+        "servingSize": "100g",
+        "calories": "285",
+        "protein": "24g",
+        "totalFat": "18g",
+        "saturatedFat": "4.9g",
+        "cholesterol": "92mg",
+        "sodium": "390mg",
+        "carbohydrates": "7g",
+        "fiber": "0g",
+        "sugars": "0g",
+    },
+    "low fat paneer": {
+        "name": "low fat paneer",
+        "servingSize": "100g",
+        "calories": "145",
+        "protein": "23g",
+        "totalFat": "6g",
+        "saturatedFat": "3.8g",
+        "cholesterol": "28mg",
+        "sodium": "320mg",
+        "carbohydrates": "4g",
+        "fiber": "0g",
+        "sugars": "2g",
+    },
+    "paneer low fat": {
+        "name": "low fat paneer",
+        "servingSize": "100g",
+        "calories": "145",
+        "protein": "23g",
+        "totalFat": "6g",
+        "saturatedFat": "3.8g",
+        "cholesterol": "28mg",
+        "sodium": "320mg",
+        "carbohydrates": "4g",
+        "fiber": "0g",
+        "sugars": "2g",
+    },
+    "low-fat paneer": {
+        "name": "low fat paneer",
+        "servingSize": "100g",
+        "calories": "145",
+        "protein": "23g",
+        "totalFat": "6g",
+        "saturatedFat": "3.8g",
+        "cholesterol": "28mg",
+        "sodium": "320mg",
+        "carbohydrates": "4g",
+        "fiber": "0g",
+        "sugars": "2g",
+    },
     "paneer": {
         "name": "paneer",
         "servingSize": "100g",
@@ -212,39 +1145,133 @@ async def analyzeFoodItem(
     Falls back to generic estimates if food not in database.
     """
     try:
-        description = payload.description.strip().lower()
-        servingSize = extractServingSize(description)
-        
-        # Find best matching food in database
-        matched_food = None
-        for keyword, food_data in FOOD_DATABASE.items():
-            if keyword in description:
-                matched_food = food_data.copy()
-                break
-        
-        if not matched_food:
-            # Fallback: generic food estimate
-            matched_food = {
-                "name": description,
-                "servingSize": "100g",
-                "calories": "150",
-                "protein": "10g",
-                "totalFat": "5g",
-                "saturatedFat": "2g",
-                "cholesterol": "20mg",
-                "sodium": "300mg",
-                "carbohydrates": "15g",
-                "fiber": "1g",
-                "sugars": "5g",
-            }
-        
-        # Scale nutrients by serving size
-        result = scaleMealNutrients(matched_food, servingSize)
-        
-        return FoodAnalysisResponse(**result)
-    
+        resolved = await _analyze_description(payload.description)
+        return FoodAnalysisResponse(**resolved)
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Food analysis failed: {str(e)}")
+
+
+async def _analyze_description(description: str) -> dict:
+    cleaned = (description or "").strip().lower()
+    if not cleaned:
+        raise ValueError("Description is required")
+
+    serving_size = extractServingSize(cleaned)
+
+    # Highest priority: user-provided nutrition CSV/JSON dataset.
+    external_match = _lookup_external_nutrition(cleaned, serving_size)
+    if external_match:
+        return external_match
+
+    provider_result = await _resolve_nutrition_with_providers(cleaned, serving_size)
+    if provider_result:
+        # If input explicitly says fried/deep fried but provider resolves to generic chicken,
+        # prefer specific fried fallback profile for better realism.
+        normalized_input = _normalized_text(cleaned)
+        normalized_provider_name = _normalized_text(str(provider_result.get("name", "")))
+        asks_fried = "fried" in normalized_input or "deep fried" in normalized_input
+        provider_is_nonfried_chicken = "chicken" in normalized_provider_name and "fried" not in normalized_provider_name
+        if asks_fried and provider_is_nonfried_chicken:
+            fried_fallback = _select_best_fallback_food("deep fried chicken")
+            if fried_fallback:
+                return scaleMealNutrients(fried_fallback, serving_size)
+        return provider_result
+
+    # Find best matching food in local fallback database after evaluating full input.
+    matched_food = _select_best_fallback_food(cleaned)
+
+    if not matched_food:
+        matched_food = {
+            "name": cleaned,
+            "servingSize": "100g",
+            "calories": "150",
+            "protein": "10g",
+            "totalFat": "5g",
+            "saturatedFat": "2g",
+            "cholesterol": "20mg",
+            "sodium": "300mg",
+            "carbohydrates": "15g",
+            "fiber": "1g",
+            "sugars": "5g",
+        }
+
+    return scaleMealNutrients(matched_food, serving_size)
+
+
+@router.post("/image-detect")
+async def detectFoodFromImage(
+    file: UploadFile = File(...),
+    userId: str = Depends(auth.getCurrentUserDependency),
+):
+    """Detect likely foods from an image and ask user to confirm one."""
+    try:
+        if not file.content_type or not file.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail="Please upload an image file")
+
+        image_bytes = await file.read()
+        if not image_bytes:
+            raise HTTPException(status_code=400, detail="Empty image file")
+
+        candidates = await _detect_with_groq_vision(file, image_bytes)
+        source = "groq" if candidates else "none"
+
+        if not candidates:
+            candidates = await _detect_with_logmeal(file, image_bytes)
+            if candidates:
+                source = "logmeal"
+
+        best_guess = candidates[0]["name"] if candidates else ""
+        has_candidates = len(candidates) > 0
+        preview_nutrition = None
+        if has_candidates:
+            preview_nutrition = await _build_detection_preview(best_guess, 100.0)
+
+        return {
+            "ok": True,
+            "prompt": "I found a strong match from your image. Confirm or edit the food name." if has_candidates else "I could not confidently identify the food from this image. Please type the food name.",
+            "candidates": candidates,
+            "bestGuess": best_guess,
+            "bestGuessConfidence": candidates[0].get("confidence") if has_candidates else 0,
+            "previewNutrition": preview_nutrition,
+            "requiresConfirmation": has_candidates,
+            "requiresManualInput": not has_candidates,
+            "source": source,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Image detection failed: {str(e)}")
+
+
+@router.post("/image-confirm")
+async def confirmImageFood(
+    payload: ImageFoodConfirmRequest,
+    userId: str = Depends(auth.getCurrentUserDependency),
+):
+    """Resolve nutrition from confirmed food label and serving size."""
+    try:
+        food_name = (payload.foodName or "").strip()
+        if not food_name:
+            raise HTTPException(status_code=400, detail="foodName is required")
+
+        grams = float(payload.servingGrams or 100)
+        grams = max(1.0, min(2000.0, grams))
+
+        external_result = _lookup_external_nutrition(food_name, grams)
+        if external_result:
+            return {"ok": True, "nutrition": external_result, "source": "csv"}
+
+        provider_result = await _resolve_nutrition_with_providers(food_name, grams)
+        if provider_result:
+            return {"ok": True, "nutrition": provider_result, "source": "provider"}
+
+        fallback_result = await _analyze_description(f"{food_name} {int(grams)}g")
+        return {"ok": True, "nutrition": fallback_result, "source": "fallback"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Nutrition confirmation failed: {str(e)}")
 
 
 @router.post("/save-meal")

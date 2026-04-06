@@ -526,17 +526,34 @@ async def getWeeklyHealth(userId: str = Depends(auth.getCurrentUserDependency)):
                 by_day[day]["calories_burned"], _extract_number(row.get("caloriesBurned"), 0.0)
             )
 
+        glucose_docs = db.collection("users").document(userId).collection("glucose").stream()
+        for doc in glucose_docs:
+            row = doc.to_dict()
+            day = _extract_date_iso(row)
+            if not day or day not in by_day:
+                continue
+            if date.fromisoformat(day) > today:
+                continue
+
+            glucose_value = _extract_number(row.get("glucoseLevel", row.get("value")), 0.0)
+            if glucose_value > 0:
+                by_day[day]["glucose"] = max(by_day[day]["glucose"], float(glucose_value))
+
         docs = db.collection("users").document(userId).collection("health_logs").stream()
         for doc in docs:
             row = doc.to_dict()
             day = _extract_date_iso(row)
             if not day or day not in by_day:
                 continue
+            if date.fromisoformat(day) > today:
+                continue
 
-            by_day[day]["sleep"] = float(_extract_number(row.get("sleep"), by_day[day]["sleep"]))
-            by_day[day]["steps"] = float(_extract_number(row.get("steps"), by_day[day]["steps"]))
-            by_day[day]["glucose"] = float(_extract_number(row.get("glucose"), by_day[day]["glucose"]))
-            by_day[day]["heart_rate"] = float(_extract_number(row.get("heartRate"), by_day[day]["heart_rate"]))
+            by_day[day]["sleep"] = max(by_day[day]["sleep"], _extract_number(row.get("sleep"), 0.0))
+            by_day[day]["steps"] = max(by_day[day]["steps"], _extract_number(row.get("steps"), 0.0))
+            by_day[day]["glucose"] = max(
+                by_day[day]["glucose"], _extract_number(row.get("glucose", row.get("glucoseLevel")), 0.0)
+            )
+            by_day[day]["heart_rate"] = max(by_day[day]["heart_rate"], _extract_number(row.get("heartRate"), 0.0))
 
         dates = [d.isoformat() for d in ordered_days]
         sleep = [round(by_day[d]["sleep"], 1) for d in dates]

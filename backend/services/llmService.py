@@ -98,7 +98,16 @@ class LLMService:
                     if modelIndex == len(self.MODELS):
                         return {"response": self._mockChatResponse(message), "llm_used": False, "model_used": None, "llm_status": "failed", "error": str(e)}
 
-            return {"response": self._mockChatResponse(message), "llm_used": False, "model_used": None, "llm_status": "failed", "error": "All models returned empty responses"}
+    async def _callLLMWithRetry(
+        self,
+        prompt: str,
+        model: str,
+        retryCount: int = 0,
+        systemPrompt: Optional[str] = None,
+        temperature: float = 0.7,
+        maxTokens: int = 1500,
+    ) -> Optional[str]:
+        """Call LLM API with specified model and automatic retry on transient errors."""
 
     # ── core HTTP call ─────────────────────────────────────────────────────────
 
@@ -120,7 +129,20 @@ class LLMService:
                     },
                     json={
                         "model": model,
-                        "messages": messages,
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": systemPrompt
+                                or (
+                                    "You are a professional health analytics assistant. "
+                                    "Respond ONLY with valid JSON, no additional text."
+                                )
+                            },
+                            {
+                                "role": "user",
+                                "content": prompt
+                            }
+                        ],
                         "temperature": temperature,
                         "max_tokens": maxTokens,
                     },
@@ -161,26 +183,39 @@ class LLMService:
         prescriptionContext = userContext.get("prescriptionContext", "No report history.")
         chatHistory: List[Dict[str, str]] = userContext.get("chatHistory", [])
 
-        systemPrompt = f"""You are LifeLytics, a supportive and practical health coach.
-Write in plain conversational English. Keep answers specific and useful.
-When user health metrics are available, reference them naturally.
-Always include 2-4 concrete next steps the user can do today.
-If symptoms could be serious, add a short safety line advising medical care.
-Avoid generic filler, avoid repeating the user message, and do not output JSON.
+        prompt = self._buildChatPrompt(message, userContext)
+        chatSystemPrompt = (
+            "You are LifeLytics, a supportive and practical health coach. "
+            "Write in plain conversational English. Keep answers specific and useful. "
+            "When user health metrics are available, reference them naturally. "
+            "Always include 2-4 concrete next steps the user can do today. "
+            "If symptoms could be serious, add a short safety line advising medical care. "
+            "Avoid generic filler, avoid repeating the user message, and do not output JSON."
+        )
 
-USER HEALTH PROFILE:
-- Height: {metrics.get('height', 'N/A')} m
-- Weight: {metrics.get('weight', 'N/A')} kg
-- BMI: {metrics.get('bmi', 'N/A')}
-- Avg Sleep: {metrics.get('avgSleep', 'N/A')} h/day
-- Avg Steps: {metrics.get('avgSteps', 'N/A')} steps/day
-- Avg Glucose: {metrics.get('avgGlucose', 'N/A')} mg/dL
-- Avg Heart Rate: {metrics.get('avgHeartRate', 'N/A')} bpm
-- Avg Calories Intake: {metrics.get('avgCaloriesIntake', 'N/A')} kcal/day
-- Data Points: {metrics.get('dataPoints', 0)}
+        with timeOperation(f"LLM chat for user {userId}") as timer:
+            # Try each model in sequence
+            for modelIndex, model in enumerate(self.MODELS, 1):
+                llmLogger.info(f"Attempting chat with model {modelIndex}/{len(self.MODELS)}: {model}")
+                try:
+                    result = await self._callLLMWithRetry(
+                        prompt,
+                        model,
+                        systemPrompt=chatSystemPrompt,
+                        temperature=0.45,
+                        maxTokens=700,
+                    )
+                    if result:
+                        llmLogger.info(f"Generated chat response for user {userId} using {model} in {timer.elapsed:.2f}s")
+                        return {
+                            "response": result,
+                            "llm_used": True,
+                            "model_used": model,
+                            "llm_status": "success"
+                        }
 
 PRESCRIPTION & REPORT HISTORY:
-{prescriptionContext}"""
+{prescriptionContext}
 
         messages = [{"role": "system", "content": systemPrompt}]
 
@@ -232,7 +267,34 @@ IMPORTANT: Respond ONLY with valid JSON. Use this exact structure:
 
 Ensure all fields are present and valid. No additional text outside JSON."""
 
-    # ── parsers & fallbacks ────────────────────────────────────────────────────
+    def _buildChatPrompt(self, message: str, userContext: Dict[str, Any]) -> str:
+        """Build detailed prompt for chatbot response with health context."""
+        metrics = userContext.get("metrics", {})
+        data_points = metrics.get("dataPoints", 0)
+        return f"""Create a personalized health chat reply.
+
+    USER HEALTH SNAPSHOT:
+    - Height: {metrics.get('height', 'N/A')} m
+    - Weight: {metrics.get('weight', 'N/A')} kg
+    - BMI: {metrics.get('bmi', 'N/A')}
+    - Avg Sleep: {metrics.get('avgSleep', 'N/A')} h/day
+    - Avg Steps: {metrics.get('avgSteps', 'N/A')} steps/day
+    - Avg Glucose: {metrics.get('avgGlucose', 'N/A')} mg/dL
+    - Avg Heart Rate: {metrics.get('avgHeartRate', 'N/A')} bpm
+    - Avg Calories Intake: {metrics.get('avgCaloriesIntake', 'N/A')} kcal/day
+    - Data Points Available: {data_points}
+
+    USER QUESTION:
+    {message}
+
+    RESPONSE RULES:
+    1. Start with a direct answer in 1-2 lines.
+    2. Add a short explanation connected to user metrics when relevant.
+    3. Give 2-4 concrete, realistic actions for today.
+    4. If data is missing, say what data would improve guidance.
+    5. If symptoms suggest risk (e.g., chest pain, severe breathlessness, fainting, high fever), add a one-line urgent care note.
+    6. Keep total response concise and practical; avoid jargon.
+    """
 
     def _parseInsightsResponse(self, llmResponse: str, originalData: Dict[str, Any], model: str) -> Dict[str, Any]:
         try:

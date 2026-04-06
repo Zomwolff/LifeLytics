@@ -40,10 +40,12 @@ export async function apiFetch(path, options = {}) {
     // no-op — DEV_MODE backend will still work without token
   }
 
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
