@@ -18,6 +18,9 @@ export default function FoodLog({ user, goBack }) {
   const [isDetectingFromPhoto, setIsDetectingFromPhoto] = useState(false);
   const [photoCandidates, setPhotoCandidates] = useState([]);
   const [selectedCandidate, setSelectedCandidate] = useState("");
+  const [detectionPreview, setDetectionPreview] = useState(null);
+  const [detectionConfidence, setDetectionConfidence] = useState(0);
+  const [detectionSource, setDetectionSource] = useState("");
   const [manualFoodName, setManualFoodName] = useState("");
   const [servingGrams, setServingGrams] = useState("100");
   const [photoError, setPhotoError] = useState("");
@@ -156,6 +159,9 @@ export default function FoodLog({ user, goBack }) {
     setPhotoPreview(URL.createObjectURL(file));
     setPhotoCandidates([]);
     setSelectedCandidate("");
+    setDetectionPreview(null);
+    setDetectionConfidence(0);
+    setDetectionSource("");
     setManualFoodName("");
     setPhotoError("");
     setCameraError("");
@@ -172,8 +178,17 @@ export default function FoodLog({ user, goBack }) {
 
       const candidates = Array.isArray(response.candidates) ? response.candidates : [];
       setPhotoCandidates(candidates);
+      setDetectionPreview(response?.previewNutrition || null);
+      setDetectionConfidence(Number(response?.bestGuessConfidence || 0));
+      setDetectionSource(response?.source || "");
       if (candidates.length > 0) {
         setSelectedCandidate(candidates[0].name);
+        setManualFoodName(response?.bestGuess || candidates[0].name || "");
+        setPhotoError("");
+      } else {
+        setSelectedCandidate("");
+        setManualFoodName("");
+        setPhotoError(response?.prompt || "Could not confidently detect food in this image. Please type the food name.");
       }
     } catch {
       setPhotoError("Could not detect food from image. Please type the name manually.");
@@ -296,6 +311,9 @@ export default function FoodLog({ user, goBack }) {
 
       setPhotoCandidates([]);
       setSelectedCandidate("");
+      setDetectionPreview(null);
+      setDetectionConfidence(0);
+      setDetectionSource("");
       setManualFoodName("");
       setServingGrams("100");
       if (photoPreview) {
@@ -468,6 +486,22 @@ export default function FoodLog({ user, goBack }) {
                       {candidate.name} ({Math.round((candidate.confidence || 0) * 100)}%)
                     </button>
                   ))}
+                </div>
+              ) : null}
+
+              {detectionPreview ? (
+                <div className="mt-3 rounded-[0.9rem] border border-[#cdd9ea] bg-white px-3 py-3 text-sm text-[#20314a]">
+                  <p className="text-[0.66rem] font-semibold uppercase tracking-[0.14em] text-[#597399]">Detected Food Summary</p>
+                  <p className="mt-1 text-base font-semibold text-[#1d324e]">{detectionPreview.name}</p>
+                  <p className="mt-1 text-xs font-semibold text-[#4d6487]">
+                    Confidence: {Math.round(detectionConfidence * 100)}%{detectionSource ? ` • Source: ${detectionSource}` : ""}
+                  </p>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs font-semibold text-[#334b6f]">
+                    <p>Calories: {detectionPreview.calories}</p>
+                    <p>Protein: {detectionPreview.protein}</p>
+                    <p>Carbs: {detectionPreview.carbohydrates}</p>
+                    <p>Fat: {detectionPreview.totalFat}</p>
+                  </div>
                 </div>
               ) : null}
 

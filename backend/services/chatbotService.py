@@ -13,6 +13,7 @@ Features:
 
 from typing import Dict, Any
 import logging
+import json
 
 from backend.utils import firestore_db
 from backend.services.llmService import getLLMService
@@ -309,6 +310,22 @@ def _ensureChatResponse(response: Any, message: str) -> str:
     """Normalize chatbot output and guarantee a useful fallback."""
     if isinstance(response, str):
         cleaned = response.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.strip("`").strip()
+            if cleaned.lower().startswith("json"):
+                cleaned = cleaned[4:].strip()
+
+        # Some models still return JSON-like payloads for chat; extract plain text safely.
+        if cleaned.startswith("{") and cleaned.endswith("}"):
+            try:
+                parsed = json.loads(cleaned)
+                for key in ["response", "answer", "message", "content", "text"]:
+                    candidate = parsed.get(key)
+                    if isinstance(candidate, str) and candidate.strip():
+                        return candidate.strip()
+            except Exception:
+                pass
+
         if cleaned:
             return cleaned
 

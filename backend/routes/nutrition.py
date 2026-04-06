@@ -14,6 +14,7 @@ import os
 import httpx
 import csv
 import json
+import base64
 from pathlib import Path
 
 from backend.utils import auth
@@ -410,11 +411,59 @@ def _fallback_candidates_from_text(seed: str) -> List[dict]:
             matches.append({"name": item["name"], "confidence": 0.72})
     if matches:
         return matches[:3]
-    return [
-        {"name": "paneer", "confidence": 0.35},
-        {"name": "chicken", "confidence": 0.33},
-        {"name": "rice", "confidence": 0.30},
-    ]
+    return []
+
+
+_DETECTION_BLOCKLIST = {
+    "food",
+    "dish",
+    "meal",
+    "plate",
+    "snack",
+    "ingredient",
+    "lunch",
+    "dinner",
+    "breakfast",
+    "cuisine",
+    "recipe",
+}
+
+
+def _sanitize_detected_label(value: str) -> str:
+    label = _normalized_text(value or "")
+    label = re.sub(r"[^a-z0-9\s]", " ", label)
+    label = re.sub(r"\s+", " ", label).strip()
+    if not label:
+        return ""
+
+    tokens = [token for token in label.split(" ") if token]
+    if not tokens:
+        return ""
+
+    # Reject generic non-food labels from vision APIs.
+    if len(tokens) == 1 and tokens[0] in _DETECTION_BLOCKLIST:
+        return ""
+
+    if any(token in _DETECTION_BLOCKLIST for token in tokens) and len(tokens) <= 2:
+        return ""
+
+    return " ".join(tokens)
+
+
+async def _build_detection_preview(food_name: str, serving_grams: float = 100.0) -> Optional[dict]:
+    external = _lookup_external_nutrition(food_name, serving_grams)
+    if external:
+        return external
+
+    resolved = await _resolve_nutrition_with_providers(food_name, serving_grams)
+    if resolved:
+        return resolved
+
+    fallback = _select_best_fallback_food(food_name)
+    if fallback:
+        return scaleMealNutrients(fallback, serving_grams)
+
+    return None
 
 
 async def _detect_with_logmeal(file: UploadFile, image_bytes: bytes) -> List[dict]:
@@ -451,7 +500,7 @@ async def _detect_with_logmeal(file: UploadFile, image_bytes: bytes) -> List[dic
                 if confidence > 1:
                     confidence = confidence / 100.0
 
-                normalized_name = str(name).strip().lower()
+                normalized_name = _sanitize_detected_label(str(name))
                 if normalized_name:
                     merged_candidates[normalized_name] = max(merged_candidates.get(normalized_name, 0.0), float(confidence))
 
@@ -459,7 +508,7 @@ async def _detect_with_logmeal(file: UploadFile, image_bytes: bytes) -> List[dic
             for key in ["foodFamily", "dishName", "best_match"]:
                 value = payload.get(key)
                 if isinstance(value, str) and value.strip():
-                    normalized_name = value.strip().lower()
+                    normalized_name = _sanitize_detected_label(value)
                     merged_candidates[normalized_name] = max(merged_candidates.get(normalized_name, 0.0), 0.5)
         except Exception:
             continue
@@ -468,10 +517,175 @@ async def _detect_with_logmeal(file: UploadFile, image_bytes: bytes) -> List[dic
         return []
 
     ranked = sorted(merged_candidates.items(), key=lambda pair: pair[1], reverse=True)
+    if not ranked:
+        return []
+
+    # Keep only strong labels so users don't get noisy/random options.
+    top_score = ranked[0][1]
+    if top_score < 0.45:
+        return []
+
+    min_score = max(0.58, top_score - 0.12)
+    filtered = [(name, score) for name, score in ranked if score >= min_score]
+
+    if len(filtered) >= 2 and (filtered[0][1] - filtered[1][1]) >= 0.22:
+        filtered = [filtered[0]]
+
     return [
         {"name": name.title(), "confidence": round(score, 2)}
-        for name, score in ranked[:5]
+        for name, score in filtered[:3]
     ]
+
+
+def _extract_json_object(text: str) -> Optional[dict]:
+    if not isinstance(text, str):
+        return None
+
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"```$", "", cleaned).strip()
+
+    try:
+        parsed = json.loads(cleaned)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
+
+    match = re.search(r"\{[\s\S]*\}", cleaned)
+    if not match:
+        return None
+
+    try:
+        parsed = json.loads(match.group(0))
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+async def _detect_with_groq_vision(file: UploadFile, image_bytes: bytes) -> List[dict]:
+    api_key = os.getenv("GROQ_API_KEY", "").strip()
+    if not api_key:
+        return []
+
+    model = os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+    mime = file.content_type or "image/jpeg"
+    image_b64 = base64.b64encode(image_bytes).decode("ascii")
+    image_url = f"data:{mime};base64,{image_b64}"
+
+    prompt_text = """You are an AI nutrition assistant.
+
+Your task is to analyze a food image and identify:
+1. All visible food items
+2. Estimated quantity of each item (in grams or standard units like pieces, cups, slices)
+3. Confidence level for each prediction (low / medium / high)
+
+Guidelines:
+- Be precise but realistic — estimates are acceptable.
+- If multiple items are mixed (e.g., curry), break them down if possible.
+- If unsure, make a best guess and mark confidence as low.
+- Ignore non-food objects (plates, spoons, background items).
+- Use common household portion sizes when exact measurement is unclear.
+
+Output format (STRICT JSON):
+{
+  "foods": [
+    {
+      "name": "food item name",
+      "quantity": number,
+      "unit": "g / ml / pieces / cups",
+      "confidence": "low / medium / high"
+    }
+  ]
+}"""
+
+    def confidence_to_score(value) -> float:
+        if isinstance(value, str):
+            label = value.strip().lower()
+            if label == "high":
+                return 0.9
+            if label == "medium":
+                return 0.65
+            if label == "low":
+                return 0.45
+
+        numeric = _extract_first_number(value)
+        if numeric > 1:
+            numeric = numeric / 100.0
+        return max(0.0, min(1.0, float(numeric)))
+
+    try:
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "temperature": 0.1,
+                    "max_tokens": 300,
+                    "messages": [
+                        {"role": "system", "content": "Follow the user prompt exactly and return strict JSON only."},
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt_text},
+                                {"type": "image_url", "image_url": {"url": image_url}},
+                            ],
+                        },
+                    ],
+                },
+            )
+
+        if response.status_code != 200:
+            return []
+
+        payload = response.json()
+        content = ((payload.get("choices") or [{}])[0].get("message") or {}).get("content")
+        parsed = _extract_json_object(content)
+        if not parsed:
+            return []
+
+        items = parsed.get("foods") or []
+        merged: dict[str, float] = {}
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            raw_name = item.get("name")
+            normalized = _sanitize_detected_label(str(raw_name or ""))
+            if not normalized:
+                continue
+            confidence = confidence_to_score(item.get("confidence"))
+            quantity = _extract_first_number(item.get("quantity"))
+            unit = str(item.get("unit") or "").strip().lower()
+
+            # Prefer entries with plausible quantity detail when confidence ties.
+            if quantity > 0 and unit in {"g", "gram", "grams", "ml", "pieces", "piece", "cups", "cup", "slices", "slice"}:
+                confidence = min(1.0, confidence + 0.03)
+
+            merged[normalized] = max(merged.get(normalized, 0.0), confidence)
+
+        if not merged:
+            return []
+
+        ranked = sorted(merged.items(), key=lambda pair: pair[1], reverse=True)
+        top_score = ranked[0][1]
+        if top_score < 0.45:
+            return []
+
+        min_score = max(0.58, top_score - 0.12)
+        filtered = [(name, score) for name, score in ranked if score >= min_score]
+        if len(filtered) >= 2 and (filtered[0][1] - filtered[1][1]) >= 0.22:
+            filtered = [filtered[0]]
+
+        return [
+            {"name": name.title(), "confidence": round(score, 2)}
+            for name, score in filtered[:3]
+        ]
+    except Exception:
+        return []
 
 
 async def _resolve_with_nutritionix(food_name: str, serving_grams: float) -> Optional[dict]:
@@ -999,16 +1213,30 @@ async def detectFoodFromImage(
         if not image_bytes:
             raise HTTPException(status_code=400, detail="Empty image file")
 
-        candidates = await _detect_with_logmeal(file, image_bytes)
+        candidates = await _detect_with_groq_vision(file, image_bytes)
+        source = "groq" if candidates else "none"
+
         if not candidates:
-            candidates = _fallback_candidates_from_text(file.filename or "")
+            candidates = await _detect_with_logmeal(file, image_bytes)
+            if candidates:
+                source = "logmeal"
+
+        best_guess = candidates[0]["name"] if candidates else ""
+        has_candidates = len(candidates) > 0
+        preview_nutrition = None
+        if has_candidates:
+            preview_nutrition = await _build_detection_preview(best_guess, 100.0)
 
         return {
             "ok": True,
-            "prompt": "I found possible matches. What food is this?",
+            "prompt": "I found a strong match from your image. Confirm or edit the food name." if has_candidates else "I could not confidently identify the food from this image. Please type the food name.",
             "candidates": candidates,
-            "requiresConfirmation": True,
-            "source": "logmeal" if os.getenv("LOGMEAL_API_KEY") else "fallback",
+            "bestGuess": best_guess,
+            "bestGuessConfidence": candidates[0].get("confidence") if has_candidates else 0,
+            "previewNutrition": preview_nutrition,
+            "requiresConfirmation": has_candidates,
+            "requiresManualInput": not has_candidates,
+            "source": source,
         }
     except HTTPException:
         raise
@@ -1029,6 +1257,10 @@ async def confirmImageFood(
 
         grams = float(payload.servingGrams or 100)
         grams = max(1.0, min(2000.0, grams))
+
+        external_result = _lookup_external_nutrition(food_name, grams)
+        if external_result:
+            return {"ok": True, "nutrition": external_result, "source": "csv"}
 
         provider_result = await _resolve_nutrition_with_providers(food_name, grams)
         if provider_result:
