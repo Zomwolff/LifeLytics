@@ -30,7 +30,10 @@ async def respond(message: str, userId: str) -> Dict[str, Any]:
             glucose = await firestore_db.getCollectionDocs(userId, "glucose")
             smartwatch = await firestore_db.getCollectionDocs(userId, "smartwatch")
             meals = await firestore_db.getCollectionDocs(userId, "meals")
+            reports = await firestore_db.getCollectionDocs(userId, "reports")
+            chat_history = await firestore_db.getChatHistory(userId)
             trend_context = await firestore_db.getLatestTrendContext(userId) or {}
+
             userContext = {
                 **user_profile,
                 "health_logs": health_logs,
@@ -67,6 +70,7 @@ async def respond(message: str, userId: str) -> Dict[str, Any]:
             responseText = _ensureChatResponse(llmResponse.get("response"), message)
             llmResponse["response"] = responseText
 
+            await firestore_db.saveChatMessage(userId, "user", message)
             await firestore_db.saveChatMessage(userId, "assistant", responseText)
 
             logger.info(f"Chat response for {userId} in {timer.elapsed:.2f}s")
@@ -125,9 +129,8 @@ def _buildHistoryContext(chat_history: List[Dict[str, Any]]) -> List[Dict[str, s
     return messages
 
 
-    Returns:
-        Formatted metrics dictionary
-    
+def _extractHealthMetrics(userContext: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract and normalize health metrics from user context."""
     height_cm = _to_number(userContext.get("heightCm"), 0)
     height = _to_number(userContext.get("height"), 0)
     if height_cm > 0:
@@ -220,7 +223,6 @@ def _to_number(value: Any, default: float = 0.0) -> float:
         text = value.strip()
         if not text:
             return default
-        parsed = []
         chunk = ""
         for char in text:
             if char.isdigit() or char == ".":
@@ -235,7 +237,7 @@ def _to_number(value: Any, default: float = 0.0) -> float:
     return default
 
 
-def _pick_first_number(row: Dict[str, Any], keys: list[str], default: float = 0.0) -> float:
+def _pick_first_number(row: Dict[str, Any], keys: List[str], default: float = 0.0) -> float:
     for key in keys:
         value = _to_number(row.get(key), 0.0)
         if value > 0:
@@ -243,10 +245,10 @@ def _pick_first_number(row: Dict[str, Any], keys: list[str], default: float = 0.
     return default
 
 
-def _numeric_series(values: Any) -> list[float]:
+def _numeric_series(values: Any) -> List[float]:
     if not isinstance(values, list):
         return []
-    output: list[float] = []
+    output: List[float] = []
     for value in values:
         parsed = _to_number(value, 0.0)
         if parsed > 0:
@@ -254,7 +256,7 @@ def _numeric_series(values: Any) -> list[float]:
     return output
 
 
-def _average(values: list[float]) -> float:
+def _average(values: List[float]) -> float:
     if not values:
         return 0.0
     return round(sum(values) / len(values), 2)
@@ -302,7 +304,6 @@ def _ensureChatResponse(response: Any, message: str) -> str:
             if cleaned.lower().startswith("json"):
                 cleaned = cleaned[4:].strip()
 
-        # Some models still return JSON-like payloads for chat; extract plain text safely.
         if cleaned.startswith("{") and cleaned.endswith("}"):
             try:
                 parsed = json.loads(cleaned)
