@@ -47,13 +47,30 @@ function isPublicPage(page) {
   return ["startup", "login", "signup"].includes(page);
 }
 
+function pageToPath(page) {
+  return `/${page}`;
+}
+
+function pathToPage(path) {
+  if (!path || path === "/") return null;
+  return path.replace(/^\//, "");
+}
+
 export default function App() {
-  const [page, setPage] = useState(() => {
+  const [page, setPageState] = useState(() => {
     const savedPage = getSavedPage();
     return savedPage && isPublicPage(savedPage) ? savedPage : "startup";
   });
   const [user, setUser] = useState(null);
   const [chatReturnPage, setChatReturnPage] = useState(() => getSavedChatReturnPage());
+
+  // Wrapper around setPageState to also update browser history
+  const setPage = (newPage) => {
+    setPageState(newPage);
+    if (typeof window !== "undefined") {
+      window.history.pushState(null, "", pageToPath(newPage));
+    }
+  };
 
   useEffect(() => {
     setSavedPage(page);
@@ -62,6 +79,20 @@ export default function App() {
   useEffect(() => {
     setSavedChatReturnPage(chatReturnPage);
   }, [chatReturnPage]);
+
+  // Initialize history and handle browser back/forward buttons
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname;
+      const pathPage = pathToPage(path);
+      if (pathPage) {
+        setPageState(pathPage);
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   useEffect(() => {
     // getSessionUser is now async — Firebase checks auth state
