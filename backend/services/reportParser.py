@@ -55,6 +55,7 @@ async def parseReport(file: UploadFile) -> Dict[str, Any]:
 
         # Use Groq vision if API key available
         if GROQ_API_KEY:
+            logger.info(f"Groq API key found, attempting vision analysis for {file.filename}")
             result = await _parseWithGroq(content, file.content_type or "image/jpeg")
             if result:
                 result["scanId"] = str(uuid.uuid4())
@@ -131,7 +132,7 @@ async def _parseWithGroq(imageBytes: bytes, contentType: str) -> Dict[str, Any]:
         logger.error(f"Failed to parse Groq JSON response: {e}")
         return None
     except Exception as e:
-        logger.error(f"Groq API call failed: {e}")
+        logger.error(f"Groq API call failed: {e}", exc_info=True)
         return None
 
 
